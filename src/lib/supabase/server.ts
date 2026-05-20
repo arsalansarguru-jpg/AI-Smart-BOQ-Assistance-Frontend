@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/config";
 /**
  * Supabase client for use in Server Components, Route Handlers, and Server Actions.
  * Bridges Supabase's cookie storage to Next.js's cookies() API.
@@ -11,8 +11,8 @@ export async function createClient() {
   const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    getSupabaseUrl(),
+    getSupabaseAnonKey(),
     {
       cookies: {
         getAll() {

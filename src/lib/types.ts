@@ -29,3 +29,27 @@ export type ProjectFile = {
 export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+/** Mirrors `public.tender_projects`. */
+export type TenderProject = {
+  id: string;
+  tender_name: string;
+  client_name: string;
+  created_by: string;
+  created_at: string;
+};
+
+/** Category values for `public.tender_files.category`. */
+export type TenderFileCategory = "boq" | "drawings" | "make_list";
+
+/** Mirrors `public.tender_files`. */
+export type TenderFile = {
+  id: string;
+  tender_project_id: string;
+  category: TenderFileCategory;
+  file_name: string;
+  file_url: string;
+  file_type: string;
+  uploaded_by: string;
+  created_at: string;
+};

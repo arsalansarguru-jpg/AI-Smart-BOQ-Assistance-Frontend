@@ -1,4 +1,5 @@
 import { downloadBlob } from "@/lib/download";
+import { getClientApiBaseUrl } from "@/lib/backend-url";
 
 export type ExtractTableBlock = {
   page: number | null;
@@ -35,12 +36,34 @@ export type StructureResponse = {
   rows_analyzed?: number | null;
 };
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ??
-  "http://localhost:8000";
+const API_BASE = getClientApiBaseUrl();
 
 export function getApiBaseUrl(): string {
   return API_BASE;
+}
+
+async function readApiErrorMessage(
+  res: Response,
+  fallback: string
+): Promise<string> {
+  const text = await res.text();
+  try {
+    const body = JSON.parse(text) as {
+      detail?: string | { msg?: string }[];
+    };
+    if (typeof body.detail === "string") return body.detail;
+    if (Array.isArray(body.detail)) {
+      return body.detail.map((d) => d.msg).filter(Boolean).join(", ");
+    }
+  } catch {
+    if (/railway/i.test(text) && /not found/i.test(text)) {
+      return (
+        "Backend API is not deployed on Railway (404). Redeploy the backend service " +
+        "(repo root directory: backend) and set API_URL on Vercel to the live service URL."
+      );
+    }
+  }
+  return fallback;
 }
 
 export async function extractFromFile(
@@ -56,18 +79,9 @@ export async function extractFromFile(
   });
 
   if (!res.ok) {
-    let message = `Extraction failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (Array.isArray(body.detail)) {
-        message = body.detail.map((d: { msg?: string }) => d.msg).join(", ");
-      }
-    } catch {
-      /* use default message */
-    }
-    throw new Error(message);
+    throw new Error(
+      await readApiErrorMessage(res, `Extraction failed (${res.status})`)
+    );
   }
 
   return res.json() as Promise<ExtractResponse>;
@@ -86,18 +100,9 @@ export async function structureExtractedBoq(
   });
 
   if (!res.ok) {
-    let message = `Structuring failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (Array.isArray(body.detail)) {
-        message = body.detail.map((d: { msg?: string }) => d.msg).join(", ");
-      }
-    } catch {
-      /* use default message */
-    }
-    throw new Error(message);
+    throw new Error(
+      await readApiErrorMessage(res, `Structuring failed (${res.status})`)
+    );
   }
 
   return res.json() as Promise<StructureResponse>;
@@ -135,18 +140,9 @@ export async function exportBoqToExcel(
   });
 
   if (!res.ok) {
-    let message = `Export failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (Array.isArray(body.detail)) {
-        message = body.detail.map((d: { msg?: string }) => d.msg).join(", ");
-      }
-    } catch {
-      /* use default message */
-    }
-    throw new Error(message);
+    throw new Error(
+      await readApiErrorMessage(res, `Export failed (${res.status})`)
+    );
   }
 
   const blob = await res.blob();

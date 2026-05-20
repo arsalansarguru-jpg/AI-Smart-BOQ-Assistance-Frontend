@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
+import { getServerBackendUrl } from "@/lib/backend-url";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ??
-  "http://localhost:8000";
+const API_BASE = getServerBackendUrl();
 
 /**
  * Check backend connectivity from the browser via the Next.js app
