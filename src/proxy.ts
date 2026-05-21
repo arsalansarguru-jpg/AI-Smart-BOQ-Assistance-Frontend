@@ -15,6 +15,6 @@ export const config = {
      * Match all request paths except static assets and Next.js internals.
      * The auth check inside updateSession() decides what to do per route.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|health|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

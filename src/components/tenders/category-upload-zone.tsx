@@ -69,6 +69,7 @@ async function uploadSingleTenderFile(
 
 type CategoryUploadZoneProps = {
   tenderProjectId: string;
+  projectName?: string;
   category: TenderFileCategory;
   files: TenderFile[];
   setupRequired?: boolean;
@@ -76,6 +77,7 @@ type CategoryUploadZoneProps = {
 
 export default function CategoryUploadZone({
   tenderProjectId,
+  projectName,
   category,
   files,
   setupRequired = false,
@@ -313,6 +315,7 @@ export default function CategoryUploadZone({
                   key={file.id}
                   file={file}
                   tenderProjectId={tenderProjectId}
+                  projectName={projectName}
                 />
               ))}
             </div>

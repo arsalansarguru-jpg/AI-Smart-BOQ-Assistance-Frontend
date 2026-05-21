@@ -1,7 +1,11 @@
+import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
-import AppToaster from "@/components/ui/toaster";
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "./_components/sidebar";
+
+const AppToaster = dynamic(() => import("@/components/ui/toaster"), {
+  ssr: false,
+});
 
 export default async function AppLayout({
   children,

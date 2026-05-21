@@ -11,6 +11,7 @@ import {
   deleteTenderFile,
   getTenderFileDownloadUrl,
 } from "@/app/(app)/tenders/[id]/_files-actions";
+import TenderExtractButton from "@/components/tenders/tender-extract-button";
 
 function FileTypeIcon({ label }: { label: string }) {
   const isPdf = label === "PDF";
@@ -58,16 +59,20 @@ function FileTypeIcon({ label }: { label: string }) {
 export default function FilePreviewCard({
   file,
   tenderProjectId,
+  projectName,
 }: {
   file: TenderFile;
   tenderProjectId: string;
+  projectName?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [downloading, setDownloading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
 
   const typeLabel = getTenderFileTypeLabel(file.file_type, file.file_name);
-  const busy = downloading || isPending;
+  const busy = downloading || isPending || extracting;
 
   async function handleDownload() {
     setDownloading(true);
@@ -113,14 +118,14 @@ export default function FilePreviewCard({
           <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
             {file.file_name}
           </p>
-          <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-neutral-800 dark:text-neutral-300">
+          <span className="shrink-0 rounded bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-neutral-800 dark:text-neutral-300">
             {typeLabel}
           </span>
         </div>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-neutral-400">
           Uploaded {formatDateTime(file.created_at)}
         </p>
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleDownload}
@@ -129,6 +134,15 @@ export default function FilePreviewCard({
           >
             {downloading ? "Opening…" : "Download"}
           </button>
+          {file.category === "boq" && (
+            <TenderExtractButton
+              file={file}
+              projectName={projectName}
+              disabled={busy}
+              onError={setExtractError}
+              onBusyChange={setExtracting}
+            />
+          )}
           <button
             type="button"
             onClick={handleDelete}
@@ -138,6 +152,11 @@ export default function FilePreviewCard({
             {isPending ? "Deleting…" : "Delete"}
           </button>
         </div>
+        {extractError && (
+          <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">
+            {extractError}
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,33 +1,33 @@
 "use client";
 
 import { useState } from "react";
-import type { ProjectFile } from "@/lib/types";
+import type { TenderFile } from "@/lib/types";
 import { extractFromFile, type ExtractResponse } from "@/lib/api";
-import { getDownloadUrl } from "../_files-actions";
+import { getTenderFileDownloadUrl } from "@/app/(app)/tenders/[id]/_files-actions";
 import ExtractionPreviewModal from "./extraction-preview-modal";
 
-const EXTRACTABLE_MIME = new Set([
+const EXTRACTABLE_TYPES = new Set([
   "application/pdf",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-function isExtractable(file: ProjectFile): boolean {
-  if (EXTRACTABLE_MIME.has(file.mime_type)) return true;
-  const lower = file.original_filename.toLowerCase();
+function isExtractable(file: TenderFile): boolean {
+  if (EXTRACTABLE_TYPES.has(file.file_type)) return true;
+  const lower = file.file_name.toLowerCase();
   return (
     lower.endsWith(".pdf") || lower.endsWith(".xls") || lower.endsWith(".xlsx")
   );
 }
 
-export default function ExtractTablesButton({
+export default function TenderExtractButton({
   file,
   projectName,
   disabled = false,
   onError,
   onBusyChange,
 }: {
-  file: ProjectFile;
+  file: TenderFile;
   projectName?: string;
   disabled?: boolean;
   onError?: (message: string | null) => void;
@@ -47,7 +47,7 @@ export default function ExtractTablesButton({
     setPreview(null);
 
     try {
-      const urlResult = await getDownloadUrl(file.storage_path);
+      const urlResult = await getTenderFileDownloadUrl(file.file_url);
       if ("error" in urlResult) {
         onError?.(urlResult.error);
         return;
@@ -55,12 +55,12 @@ export default function ExtractTablesButton({
 
       const blobRes = await fetch(urlResult.url);
       if (!blobRes.ok) {
-        onError?.("Could not download file for extraction.");
+        onError?.("Could not download file for table extraction.");
         return;
       }
       const blob = await blobRes.blob();
 
-      const result = await extractFromFile(blob, file.original_filename);
+      const result = await extractFromFile(blob, file.file_name);
       setPreview(result);
     } catch (err) {
       const message =
@@ -71,7 +71,7 @@ export default function ExtractTablesButton({
         message.includes("NetworkError")
       ) {
         onError?.(
-          "Cannot reach extraction API. Start the backend: cd backend, activate .venv, then run: python -m uvicorn app.main:app --reload --port 8000"
+          "Cannot reach extraction API. Start the backend: python -m uvicorn app.main:app --reload --port 8000"
         );
       } else {
         onError?.(message);
@@ -89,9 +89,16 @@ export default function ExtractTablesButton({
         onClick={handleExtract}
         disabled={disabled || loading}
         aria-busy={loading}
-        className="inline-flex items-center rounded-md border border-gray-900 bg-gray-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white dark:bg-white dark:text-gray-900 dark:hover:bg-neutral-200"
+        className="inline-flex items-center rounded-md border border-gray-900 bg-gray-900 px-2.5 py-1 text-xs font-bold text-white shadow-xs transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white dark:bg-white dark:text-gray-900 dark:hover:bg-neutral-200 cursor-pointer"
       >
-        {loading ? "Extracting..." : "Extract tables"}
+        {loading ? (
+          <>
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border border-white border-t-transparent dark:border-gray-900 dark:border-t-transparent mr-1" />
+            Extracting…
+          </>
+        ) : (
+          "Extract tables"
+        )}
       </button>
       {preview ? (
         <ExtractionPreviewModal

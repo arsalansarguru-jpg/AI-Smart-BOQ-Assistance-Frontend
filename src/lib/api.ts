@@ -18,7 +18,7 @@ export type ExtractResponse = {
 
 export type BoqLineItem = {
   item_no: string | null;
-  section: string | null;
+  category: string | null;
   description: string;
   unit: string | null;
   quantity: number | null;

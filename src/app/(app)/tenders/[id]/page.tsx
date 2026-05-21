@@ -118,6 +118,7 @@ export default async function TenderDetailPage({
         ) : (
           <TenderDocumentsManager
             tenderProjectId={project.id}
+            projectName={project.tender_name}
             files={files}
             setupRequired={false}
           />

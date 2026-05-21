@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 next dev",
-    "build": "node ./scripts/ensure-next-env.mjs && next build && node ./scripts/ensure-next-env.mjs",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=3072 next dev --webpack",
+    "dev:tls": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 NODE_OPTIONS=--max-old-space-size=3072 next dev --webpack",
+    "dev:stable": "npm run build && npm run start",
+    "clean": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\"",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 node ./scripts/ensure-next-env.mjs && next build && node ./scripts/ensure-next-env.mjs",
     "start": "next start",
     "lint": "eslint"
   },

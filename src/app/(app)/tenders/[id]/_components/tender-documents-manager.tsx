@@ -5,10 +5,12 @@ const CATEGORIES: TenderFileCategory[] = ["boq", "drawings", "make_list"];
 
 export default function TenderDocumentsManager({
   tenderProjectId,
+  projectName,
   files,
   setupRequired,
 }: {
   tenderProjectId: string;
+  projectName?: string;
   files: TenderFile[];
   setupRequired: boolean;
 }) {
@@ -21,6 +23,7 @@ export default function TenderDocumentsManager({
         <CategoryUploadZone
           key={category}
           tenderProjectId={tenderProjectId}
+          projectName={projectName}
           category={category}
           files={byCategory(category)}
           setupRequired={setupRequired}
