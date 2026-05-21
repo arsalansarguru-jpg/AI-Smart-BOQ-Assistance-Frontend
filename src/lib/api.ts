@@ -110,6 +110,45 @@ export async function structureExtractedBoq(
   return res.json() as Promise<StructureResponse>;
 }
 
+export type QuotationLineItem = {
+  item_name: string;
+  brand?: string | null;
+  unit?: string | null;
+  quoted_rate: number;
+  normalized_item_name?: string | null;
+};
+
+export type QuotationStructureResponse = {
+  vendor_name: string;
+  quotation_date?: string | null;
+  items: QuotationLineItem[];
+  confidence: number;
+  summary?: string | null;
+  warnings?: string[];
+};
+
+export async function structureExtractedQuotation(
+  extract: ExtractResponse
+): Promise<QuotationStructureResponse> {
+  const res = await fetch(`${API_BASE}/api/structure/quotation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: extract.filename,
+      tables: extract.tables,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      await readApiErrorMessage(res, `Quotation structuring failed (${res.status})`)
+    );
+  }
+
+  return res.json() as Promise<QuotationStructureResponse>;
+}
+
+
 export type ExportBoqOptions = {
   projectName?: string;
 };
