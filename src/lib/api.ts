@@ -25,6 +25,8 @@ export type BoqLineItem = {
   rate: number | null;
   amount: number | null;
   remarks: string | null;
+  confidence?: number | null;
+  original_text?: string | null;
 };
 
 export type StructureResponse = {
