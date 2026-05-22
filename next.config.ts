@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
     maxInactiveAge: 30 * 1000,
     pagesBufferLength: 1,
   },
+  turbopack: {},
   webpack: (config, { dev }) => {
     if (dev) {
       config.cache = false;
