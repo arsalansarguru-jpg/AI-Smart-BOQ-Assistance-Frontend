@@ -9,6 +9,7 @@ import SetupTenderHint from "../_components/setup-tender-hint";
 import DeleteTenderButton from "./delete-tender-button";
 import TenderDocumentsManager from "./_components/tender-documents-manager";
 import TenderFilesSummary from "./_components/tender-files-summary";
+import TenderRiskConsole from "../_components/tender-risk-console";
 
 export const metadata = {
   title: "Tender Project - BOQ Automation",
@@ -16,10 +17,15 @@ export const metadata = {
 
 export default async function TenderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
+  const resolvedSearchParams = await searchParams;
+  const tab = resolvedSearchParams?.tab || "documents";
+
   const dbStatus = await checkTenderDatabase();
   const setupRequired = !dbStatus.ok;
 
@@ -90,7 +96,7 @@ export default async function TenderDetailPage({
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 mb-8">
         <DetailRow label="Tender name" value={project.tender_name} />
         <DetailRow label="Client" value={project.client_name} />
         <DetailRow label="Created" value={formatDateTime(project.created_at)} />
@@ -100,28 +106,63 @@ export default async function TenderDetailPage({
         />
       </div>
 
-      <section className="mt-10 space-y-8">
-        <TenderFilesSummary files={files} />
-
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Upload & manage documents
-          </h2>
-          <p className="mt-1 text-sm text-gray-500 dark:text-neutral-400">
-            Upload files into the correct category. Drag and drop multiple
-            files, track progress, preview, and delete as needed.
-          </p>
+      {/* Tabs navigation list */}
+      <div className="border-b border-gray-200 dark:border-neutral-800 mb-6">
+        <div className="flex gap-6">
+          <Link
+            href={`/tenders/${id}?tab=documents`}
+            className={`pb-3 text-sm font-semibold border-b-2 px-1 transition ${
+              tab === "documents"
+                ? "border-violet-500 text-violet-650 dark:text-violet-400"
+                : "border-transparent text-gray-500 hover:text-gray-900 dark:text-neutral-400 dark:hover:text-white"
+            }`}
+          >
+            Document Repository
+          </Link>
+          <Link
+            href={`/tenders/${id}?tab=risk`}
+            className={`pb-3 text-sm font-semibold border-b-2 px-1 transition flex items-center gap-2 ${
+              tab === "risk"
+                ? "border-violet-500 text-violet-650 dark:text-violet-400"
+                : "border-transparent text-gray-500 hover:text-gray-900 dark:text-neutral-400 dark:hover:text-white"
+            }`}
+          >
+            <span>AI Risk Analysis Console</span>
+            <span className="rounded-full bg-violet-100 dark:bg-violet-950 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              AI
+            </span>
+          </Link>
         </div>
+      </div>
 
-        {setupRequired ? (
-          <SetupTenderHint />
+      <section className="space-y-8">
+        {tab === "documents" ? (
+          <>
+            <TenderFilesSummary files={files} />
+
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Upload & manage documents
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-neutral-400">
+                Upload files into the correct category. Drag and drop multiple
+                files, track progress, preview, and delete as needed.
+              </p>
+            </div>
+
+            {setupRequired ? (
+              <SetupTenderHint />
+            ) : (
+              <TenderDocumentsManager
+                tenderProjectId={project.id}
+                projectName={project.tender_name}
+                files={files}
+                setupRequired={false}
+              />
+            )}
+          </>
         ) : (
-          <TenderDocumentsManager
-            tenderProjectId={project.id}
-            projectName={project.tender_name}
-            files={files}
-            setupRequired={false}
-          />
+          <TenderRiskConsole projectId={project.id} />
         )}
       </section>
     </main>
@@ -140,3 +181,4 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+

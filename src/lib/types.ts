@@ -53,3 +53,43 @@ export type TenderFile = {
   uploaded_by: string;
   created_at: string;
 };
+
+/** Mirrors `public.tender_risk_summaries`. */
+export type TenderRiskSummary = {
+  id: string;
+  tender_project_id: string;
+  risk_score: number;
+  executive_summary: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Category values for `public.tender_risk_clauses.category`. */
+export type TenderRiskCategory =
+  | "payment"
+  | "timeline_penalties"
+  | "scope_clarity"
+  | "liability_warranty"
+  | "other";
+
+/** Mirrors `public.tender_risk_clauses`. */
+export type TenderRiskClause = {
+  id: string;
+  tender_project_id: string;
+  category: TenderRiskCategory;
+  clause_number: string | null;
+  original_text: string;
+  risk_description: string;
+  severity: "high" | "medium" | "low";
+  mitigation_strategy: string;
+  suggested_amendment: string | null;
+  pricing_buffer_percentage: number;
+  status: "unreviewed" | "mitigated" | "accepted" | "disputed";
+  estimator_notes: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
