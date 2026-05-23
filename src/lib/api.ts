@@ -248,6 +248,40 @@ export async function autoLinkProjectFiles(
   return res.json() as Promise<AutoLinkResponse>;
 }
 
+export type PriceListMatchRequest = {
+  description: string;
+  category?: string | null;
+  price_lists: string[];
+};
+
+export type PriceListMatchResponse = {
+  matched: boolean;
+  brand?: string | null;
+  catalog_code?: string | null;
+  list_price?: number | null;
+  discount?: number | null;
+  matched_description?: string | null;
+  notes?: string | null;
+};
+
+export async function matchPriceListCatalog(
+  payload: PriceListMatchRequest
+): Promise<PriceListMatchResponse> {
+  const res = await fetch(`${API_BASE}/api/sourcing/match-price-list`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      await readApiErrorMessage(res, `AI Catalog matching failed (${res.status})`)
+    );
+  }
+
+  return res.json() as Promise<PriceListMatchResponse>;
+}
+
 export async function checkApiHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });

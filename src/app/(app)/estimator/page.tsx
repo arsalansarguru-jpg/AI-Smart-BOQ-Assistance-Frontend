@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import PageBreadcrumb from "@/app/(app)/_components/page-breadcrumb";
 import { fetchVendorQuotations, type LocalVendorQuotation } from "@/lib/tenders/quotations";
 import { createClient } from "@/lib/supabase/client";
-import { autoLinkProjectFiles } from "@/lib/api";
+import { autoLinkProjectFiles, matchPriceListCatalog } from "@/lib/api";
 import type { TenderFile } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -25,6 +25,12 @@ export type WorkspaceBoqItem = {
   // Approval states
   status: "Draft" | "Pending Senior Review" | "Pending Procurement" | "Approved" | "Revision Requested";
   changeRequestComment?: string;
+  // Cost Buildup Suit
+  listPrice?: number;
+  discountPercentage?: number;
+  overheadPercentage?: number;
+  laborCost?: number;
+  rateType?: 'unit' | 'composite';
   // Relationship links
   references: {
     drawings: { id: string; sheetNumber: string; title: string; fileUrl: string }[];
@@ -35,6 +41,31 @@ export type WorkspaceBoqItem = {
     notes: string;
   };
 };
+
+function recalculateItemRates(item: WorkspaceBoqItem): WorkspaceBoqItem {
+  if (item.rateType === "composite") {
+    const listPrice = item.listPrice !== undefined ? item.listPrice : item.rate;
+    const discount = item.discountPercentage ?? 0;
+    const overhead = item.overheadPercentage ?? 0;
+    const labor = item.laborCost ?? 0;
+
+    const netMaterial = listPrice * (1 - discount / 100);
+    const landedMaterial = netMaterial * (1 + overhead / 100);
+    const compositeRate = parseFloat((landedMaterial + labor).toFixed(2));
+
+    return {
+      ...item,
+      listPrice,
+      rate: compositeRate,
+      amount: parseFloat((compositeRate * item.quantity).toFixed(2)),
+    };
+  } else {
+    return {
+      ...item,
+      amount: parseFloat((item.rate * item.quantity).toFixed(2)),
+    };
+  }
+}
 
 export type EstimateProject = {
   id: string;
@@ -504,7 +535,8 @@ export default function MasterBoqWorkspace() {
   };
 
   // Relationship Map local states & toggle mappings
-  const [sidebarTab, setSidebarTab] = useState<"specs" | "map">("specs");
+  const [sidebarTab, setSidebarTab] = useState<"specs" | "buildup" | "map">("specs");
+  const [catalogMatchingLoading, setCatalogMatchingLoading] = useState(false);
   const [focusedGraphNode, setFocusedGraphNode] = useState<"drawing" | "clause" | "make" | "quote" | "risk">("drawing");
   const [graphSearchQuery, setGraphSearchQuery] = useState("");
   const [gapFilter, setGapFilter] = useState<"all" | "missing-dwg" | "missing-bid" | "high-risk" | "unlinked">("all");
@@ -805,6 +837,108 @@ Office of Procurement`;
       setSourcingError(err instanceof Error ? err.message : "Sourcing failed.");
     } finally {
       setSourcingLoading(false);
+    }
+  };
+
+  const handleQueryAiCatalog = async () => {
+    if (!selectedItemId) return;
+    const boqItem = items.find(it => it.id === selectedItemId);
+    if (!boqItem) return;
+
+    if (subscribed === false) {
+      toast.error("Upgrade Plan Required", {
+        description: "AI Price List Catalog Lookup is a Professional Plan feature. Upgrade your workspace now!",
+        action: {
+          label: "Upgrade Plan",
+          onClick: () => window.location.href = "/pricing"
+        }
+      });
+      return;
+    }
+
+    // Filter project files for catalogs or price lists
+    const catalogFiles = projectFiles
+      .filter(f => f.category === "make_list" || f.file_name.toLowerCase().includes("pricelist") || f.file_name.toLowerCase().includes("catalog"))
+      .map(f => f.file_name);
+
+    if (catalogFiles.length === 0) {
+      toast.warning("No Catalog Files Uploaded", {
+        description: "Please upload a manufacturer catalog or price list PDF in the project repository first (under 'make_list').",
+      });
+      return;
+    }
+
+    setCatalogMatchingLoading(true);
+    const toastId = toast.loading("AI Catalog matching is running...", {
+      description: `Searching for '${boqItem.description}' across ${catalogFiles.length} uploaded catalogs...`,
+    });
+
+    try {
+      const res = await matchPriceListCatalog({
+        description: boqItem.description,
+        category: boqItem.category,
+        price_lists: catalogFiles
+      });
+
+      if (res && res.matched) {
+        const listPriceVal = res.list_price || boqItem.rate;
+        const discountVal = res.discount || 0;
+        
+        const updated = items.map(item => {
+          if (item.id === boqItem.id) {
+            let copy: WorkspaceBoqItem = {
+              ...item,
+              rateType: "composite" as const,
+              listPrice: listPriceVal,
+              discountPercentage: discountVal,
+              overheadPercentage: item.overheadPercentage ?? 5,
+              laborCost: item.laborCost ?? 0,
+            };
+            
+            if (res.brand) {
+              const currentMakes = item.references.makes || [];
+              if (!currentMakes.some(m => m.brand.toLowerCase() === res.brand!.toLowerCase())) {
+                copy.references = {
+                  ...item.references,
+                  makes: [...currentMakes, { brand: res.brand, status: "Approved" }]
+                };
+              }
+            }
+
+            if (res.notes) {
+              copy.references = {
+                ...copy.references,
+                notes: copy.references.notes ? `${copy.references.notes} [AI Catalog: ${res.notes}]` : `[AI Catalog: ${res.notes}]`
+              };
+            }
+
+            copy = recalculateItemRates(copy);
+            return copy;
+          }
+          return item;
+        });
+
+        setItems(updated);
+        localStorage.setItem(`boq_workspace_${selectedProjectId}`, JSON.stringify(updated));
+
+        toast.success("AI Price List Match Found!", {
+          id: toastId,
+          description: `Matched with ${res.brand || "Catalog"} (MSRP: ₹${listPriceVal.toLocaleString("en-IN")}, Discount: ${discountVal}%). Updated rate to ₹${recalculateItemRates(updated.find(it => it.id === boqItem.id)!).rate.toLocaleString("en-IN")}.`,
+        });
+      } else {
+        toast.warning("No Catalog Match Found", {
+          id: toastId,
+          description: `AI could not find a clear match for this item in the uploaded catalogs. Standard unit rate is preserved.`,
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("AI Catalog Matching Failed", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Lookup failed.",
+      });
+    } finally {
+      setCatalogMatchingLoading(false);
     }
   };
 
@@ -1449,13 +1583,25 @@ Office of Procurement`;
 
     const updated = items.map(item => {
       if (item.id === id) {
-        const copy = { ...item, [field]: value };
+        let copy = { ...item, [field]: value };
         
-        // Autocalculate amount
-        if (field === "quantity" || field === "rate") {
-          const qty = field === "quantity" ? Number(value) : item.quantity;
-          const rate = field === "rate" ? Number(value) : item.rate;
-          copy.amount = parseFloat((qty * rate).toFixed(2));
+        // If switching to composite, initialize listPrice if not present
+        if (field === "rateType" && value === "composite") {
+          if (copy.listPrice === undefined || copy.listPrice === 0) {
+            copy.listPrice = item.rate;
+          }
+          if (copy.discountPercentage === undefined) copy.discountPercentage = 0;
+          if (copy.overheadPercentage === undefined) copy.overheadPercentage = 0;
+          if (copy.laborCost === undefined) copy.laborCost = 0;
+        }
+
+        // If rate is edited, and it's a composite rate, route the edit to listPrice
+        if (field === "rate") {
+          if (copy.rateType === "composite") {
+            copy.listPrice = Number(value);
+          } else {
+            copy.listPrice = Number(value);
+          }
         }
 
         // Auto transition status if junior updates a change request
@@ -1463,6 +1609,9 @@ Office of Procurement`;
           copy.status = "Pending Senior Review";
           delete copy.changeRequestComment;
         }
+
+        // Run cost buildup math
+        copy = recalculateItemRates(copy);
 
         return copy;
       }
@@ -2640,7 +2789,7 @@ Office of Procurement`;
               
               {/* SIDE DRAWER TABS SELECTOR */}
               <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-4">
-                <div className="flex gap-2.5">
+                <div className="flex gap-2 flex-wrap items-center">
                   <button
                     onClick={() => setSidebarTab("specs")}
                     className={`text-xs font-bold transition cursor-pointer ${
@@ -2649,7 +2798,16 @@ Office of Procurement`;
                   >
                     Pricing & Specs
                   </button>
-                  <span className="text-zinc-700">|</span>
+                  <span className="text-zinc-750">|</span>
+                  <button
+                    onClick={() => setSidebarTab("buildup")}
+                    className={`text-xs font-bold transition cursor-pointer ${
+                      sidebarTab === "buildup" ? "text-violet-400 font-extrabold" : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Cost Buildup
+                  </button>
+                  <span className="text-zinc-750">|</span>
                   <button
                     onClick={() => setSidebarTab("map")}
                     className={`text-xs font-bold transition cursor-pointer ${
@@ -2661,7 +2819,7 @@ Office of Procurement`;
                 </div>
                 <button
                   onClick={() => setSelectedItemId(null)}
-                  className="text-zinc-500 hover:text-zinc-200 text-xs font-semibold p-1 cursor-pointer"
+                  className="text-zinc-500 hover:text-zinc-200 text-xs font-semibold p-1 cursor-pointer shrink-0"
                 >
                   ✕ Close
                 </button>
@@ -2688,7 +2846,7 @@ Office of Procurement`;
                 )}
               </div>
 
-              {sidebarTab === "specs" ? (
+              {sidebarTab === "specs" && (
                 <>
                   {/* MULTI-ROLE REVIEW ACTIONS CONSOLE */}
                   {!boqLocked && (
@@ -2905,7 +3063,268 @@ Office of Procurement`;
                     )}
                   </div>
                 </>
-              ) : (
+              )}
+
+              {sidebarTab === "buildup" && (
+                <div className="space-y-4 animate-in fade-in duration-200 text-xs text-zinc-300">
+                  {/* 1. Rate Type Mode Selector */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                    <span className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-2">Estimation Rate Mode</span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => updateItemField(selectedItem.id, "rateType", "unit")}
+                        className={`flex-1 py-1.5 px-3 rounded-lg font-bold text-[10px] transition uppercase tracking-wider cursor-pointer ${
+                          (selectedItem.rateType || "unit") === "unit"
+                            ? "bg-zinc-800 text-zinc-100 border border-zinc-700"
+                            : "bg-zinc-950 text-zinc-500 border border-zinc-900 hover:text-zinc-300"
+                        }`}
+                      >
+                        Unit Rate (Manual)
+                      </button>
+                      <button
+                        onClick={() => updateItemField(selectedItem.id, "rateType", "composite")}
+                        className={`flex-1 py-1.5 px-3 rounded-lg font-bold text-[10px] transition uppercase tracking-wider cursor-pointer ${
+                          selectedItem.rateType === "composite"
+                            ? "bg-violet-950/40 text-violet-400 border border-violet-500/30"
+                            : "bg-zinc-950 text-zinc-500 border border-zinc-900 hover:text-zinc-300"
+                        }`}
+                      >
+                        Composite Buildup
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-zinc-500 mt-2 leading-relaxed">
+                      {(selectedItem.rateType || "unit") === "unit"
+                        ? "Supply-and-install rate is defined as a single static value. Sliders are disabled."
+                        : "Supply-and-install rate is built up dynamically from list prices, trade discounts, overheads, and installation labor."}
+                    </p>
+                  </div>
+
+                  {/* 2. AI Price List Catalog Lookup Callout Card */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 bg-violet-500/10 px-2 py-0.5 rounded-bl text-[8px] font-extrabold text-violet-400 border-l border-b border-violet-500/20 uppercase tracking-wider select-none">
+                      AI Engine
+                    </div>
+                    <span className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-2">Price Catalog Matching</span>
+                    
+                    {(() => {
+                      const catalogs = projectFiles.filter(f => f.category === "make_list" || f.file_name.toLowerCase().includes("pricelist") || f.file_name.toLowerCase().includes("catalog"));
+                      if (catalogs.length > 0) {
+                        return (
+                          <div className="space-y-2">
+                            <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-950 text-[10px]">
+                              <p className="text-zinc-400 font-bold mb-1 flex items-center gap-1">
+                                📂 {catalogs.length} price lists available:
+                              </p>
+                              <ul className="list-disc pl-3 text-zinc-500 space-y-0.5 line-clamp-2">
+                                {catalogs.map(c => (
+                                  <li key={c.id} className="truncate">{c.file_name}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            
+                            <button
+                              disabled={catalogMatchingLoading || boqLocked}
+                              onClick={handleQueryAiCatalog}
+                              className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-bold py-2 rounded-lg transition uppercase tracking-wider text-[10px] cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-violet-500/10"
+                            >
+                              {catalogMatchingLoading ? (
+                                <>
+                                  <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                  </svg>
+                                  Searching Price Lists...
+                                </>
+                              ) : (
+                                <>
+                                  🔍 Query AI Price List Catalog
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div className="bg-zinc-950/40 p-2.5 rounded-lg border border-zinc-900/60 text-center text-zinc-500 text-[10px] leading-relaxed">
+                            <span className="block mb-1 text-amber-500/80 font-bold">⚠️ No Price Lists Uploaded</span>
+                            Upload supplier catalogs or price list PDFs (under 'make_list' category) to let the AI search for the official MSRP.
+                          </div>
+                        );
+                      }
+                    })()}
+                  </div>
+
+                  {/* 3. Calculations Sliders & Numeric Inputs */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 space-y-4">
+                    <span className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-1">QS Cost Buildup Parameters</span>
+                    
+                    {/* List Price (MSRP) */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-zinc-400 font-bold">List Price (MSRP):</span>
+                        <span className="text-zinc-500 font-mono text-[9px]">(₹)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          disabled={boqLocked || (selectedItem.rateType || "unit") === "unit"}
+                          value={selectedItem.listPrice !== undefined ? selectedItem.listPrice : selectedItem.rate}
+                          onChange={(e) => updateItemField(selectedItem.id, "listPrice", Number(e.target.value))}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg py-1 px-2.5 font-mono text-xs text-zinc-100 focus:outline-none focus:border-violet-500 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          min="0"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Trade Discount */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-zinc-400 font-bold">Trade Discount:</span>
+                        <span className="text-violet-400 font-mono font-extrabold">{selectedItem.discountPercentage ?? 0}%</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          disabled={boqLocked || (selectedItem.rateType || "unit") === "unit"}
+                          min="0"
+                          max="80"
+                          step="1"
+                          value={selectedItem.discountPercentage ?? 0}
+                          onChange={(e) => updateItemField(selectedItem.id, "discountPercentage", Number(e.target.value))}
+                          className="w-full accent-violet-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        />
+                        <input
+                          type="number"
+                          disabled={boqLocked || (selectedItem.rateType || "unit") === "unit"}
+                          min="0"
+                          max="100"
+                          value={selectedItem.discountPercentage ?? 0}
+                          onChange={(e) => updateItemField(selectedItem.id, "discountPercentage", Math.min(100, Number(e.target.value)))}
+                          className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg py-0.5 px-1.5 font-mono text-center text-[10px] text-zinc-200 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Execution Overheads */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-zinc-400 font-bold" title="Carriage, storage, tools, safety & scaffolding">
+                          Execution Overheads:
+                        </span>
+                        <span className="text-violet-400 font-mono font-extrabold">{selectedItem.overheadPercentage ?? 0}%</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          disabled={boqLocked || (selectedItem.rateType || "unit") === "unit"}
+                          min="0"
+                          max="30"
+                          step="0.5"
+                          value={selectedItem.overheadPercentage ?? 0}
+                          onChange={(e) => updateItemField(selectedItem.id, "overheadPercentage", Number(e.target.value))}
+                          className="w-full accent-violet-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        />
+                        <input
+                          type="number"
+                          disabled={boqLocked || (selectedItem.rateType || "unit") === "unit"}
+                          min="0"
+                          max="100"
+                          value={selectedItem.overheadPercentage ?? 0}
+                          onChange={(e) => updateItemField(selectedItem.id, "overheadPercentage", Math.min(100, Number(e.target.value)))}
+                          className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg py-0.5 px-1.5 font-mono text-center text-[10px] text-zinc-200 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Labor Cost */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-zinc-400 font-bold" title="Installation, testing & commissioning labor">
+                          Installation Labor Cost:
+                        </span>
+                        <span className="text-zinc-500 font-mono text-[9px]">(₹)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          disabled={boqLocked || (selectedItem.rateType || "unit") === "unit"}
+                          value={selectedItem.laborCost ?? 0}
+                          onChange={(e) => updateItemField(selectedItem.id, "laborCost", Number(e.target.value))}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg py-1 px-2.5 font-mono text-xs text-zinc-100 focus:outline-none focus:border-violet-500 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          min="0"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 4. Live Formula Blueprint Card */}
+                  {(() => {
+                    const listPrice = selectedItem.listPrice !== undefined ? selectedItem.listPrice : selectedItem.rate;
+                    const discount = selectedItem.discountPercentage ?? 0;
+                    const overhead = selectedItem.overheadPercentage ?? 0;
+                    const labor = selectedItem.laborCost ?? 0;
+
+                    const discountAmt = listPrice * (discount / 100);
+                    const netMaterial = listPrice - discountAmt;
+                    const overheadAmt = netMaterial * (overhead / 100);
+                    const landedMaterial = netMaterial + overheadAmt;
+                    const compositeRate = landedMaterial + labor;
+
+                    return (
+                      <div className="bg-zinc-950 border border-zinc-850 rounded-xl p-3.5 font-mono space-y-2.5 text-[10px] relative overflow-hidden select-none">
+                        <div className="absolute top-0 right-0 h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse m-2" />
+                        <span className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-1">Live Formula Blueprint</span>
+                        
+                        <div className="space-y-1 divide-y divide-zinc-900/60 font-sans">
+                          <div className="flex justify-between py-1 text-zinc-400 font-mono">
+                            <span>List Price (MSRP)</span>
+                            <span className="text-zinc-200">{formatPrice(listPrice)}</span>
+                          </div>
+                          
+                          <div className="flex justify-between py-1 text-zinc-400 font-mono">
+                            <span>Trade Discount ({discount}%)</span>
+                            <span className="text-red-400/80">- {formatPrice(discountAmt)}</span>
+                          </div>
+
+                          <div className="flex justify-between py-1 text-zinc-300 font-bold bg-zinc-900/20 px-1 rounded font-mono">
+                            <span>Net Material Cost</span>
+                            <span>= {formatPrice(netMaterial)}</span>
+                          </div>
+
+                          <div className="flex justify-between py-1 text-zinc-400 font-mono">
+                            <span>Overhead Markup ({overhead}%)</span>
+                            <span className="text-emerald-400/80">+ {formatPrice(overheadAmt)}</span>
+                          </div>
+
+                          <div className="flex justify-between py-1 text-zinc-300 font-bold bg-zinc-900/20 px-1 rounded font-mono">
+                            <span>Material Landed Cost</span>
+                            <span>= {formatPrice(landedMaterial)}</span>
+                          </div>
+
+                          <div className="flex justify-between py-1 text-zinc-400 font-mono">
+                            <span>Labor / Installation</span>
+                            <span className="text-emerald-400/80">+ {formatPrice(labor)}</span>
+                          </div>
+
+                          <div className="flex justify-between py-1.5 text-xs text-violet-400 font-black border-t border-violet-500/20 bg-violet-500/5 px-2 rounded-lg mt-1 shadow-inner font-mono">
+                            <span>Composite Rate</span>
+                            <span>= {formatPrice(compositeRate)}</span>
+                          </div>
+
+                          <div className="flex justify-between py-1 text-[9px] text-zinc-500 italic mt-1.5 font-mono">
+                            <span>Grand Sum ({selectedItem.quantity} {selectedItem.unit})</span>
+                            <span>{formatPrice(compositeRate * selectedItem.quantity)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {sidebarTab === "map" && (
                 <div className="space-y-4 animate-in fade-in duration-200 text-xs select-none">
                   <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3">
                     <span className="text-[10px] font-extrabold text-violet-400 uppercase tracking-wider block mb-1">Interactive Linker Console</span>
