@@ -673,6 +673,78 @@ Office of Procurement`;
     window.open(mailtoUrl);
   };
 
+  const handleMitigateRisk = (itemId: string, riskId: string, action: "apply" | "restore") => {
+    const updated = items.map(item => {
+      if (item.id === itemId) {
+        const risks = item.references.risks || [];
+        const targetRisk = risks.find(r => r.id === riskId);
+        if (!targetRisk) return item;
+
+        // Determine multiplier based on risk ID
+        let multiplier = 1.03; // Default 3%
+        let noteToken = "";
+        
+        if (riskId === "rk-1" || riskId === "rk-1-alt") {
+          multiplier = 1.035;
+          noteToken = "[🛡 Mitigated: Delay Liquidated Damages capped at 5% of Contract Value; 3.5% financing buffer added to rate]";
+        } else if (riskId === "rk-2") {
+          multiplier = 1.05;
+          noteToken = "[🛡 Mitigated: Equipment warranty extended to 60-month; 5% warranty reserve buffer added to rate]";
+        } else if (riskId === "rk-3") {
+          multiplier = 1.04;
+          noteToken = "[🛡 Mitigated: 90-day credit term risk offset; 4% working capital interest buffer added to rate]";
+        } else if (riskId === "rk-4") {
+          multiplier = 1.03;
+          noteToken = "[🛡 Mitigated: Routing clash liability buffer; 3% design-risk contingency added to rate]";
+        } else if (riskId === "rk-5") {
+          multiplier = 1.06;
+          noteToken = "[🛡 Mitigated: Fast-track double shift schedule offset; 6% acceleration labor reserve added to rate]";
+        } else {
+          noteToken = `[🛡 Mitigated: Risk ${riskId} resolved; 3% rate contingency buffer added]`;
+        }
+
+        let newRate = item.rate;
+        let newRisks = risks;
+        let newNotes = item.references.notes || "";
+
+        if (action === "apply") {
+          if (targetRisk.status === "Mitigated") return item; // Already mitigated
+
+          newRate = Math.round(item.rate * multiplier * 100) / 100;
+          newRisks = risks.map(r => r.id === riskId ? { ...r, status: "Mitigated" } : r);
+          
+          // Append note token if not already present
+          if (!newNotes.includes(noteToken)) {
+            newNotes = newNotes ? `${newNotes} ${noteToken}` : noteToken;
+          }
+        } else {
+          if (targetRisk.status !== "Mitigated") return item; // Not mitigated, can't restore
+
+          newRate = Math.round((item.rate / multiplier) * 100) / 100;
+          newRisks = risks.map(r => r.id === riskId ? { ...r, status: "Unmitigated" } : r);
+          
+          // Remove note token
+          newNotes = newNotes.replace(noteToken, "").trim();
+        }
+
+        return {
+          ...item,
+          rate: newRate,
+          amount: Math.round(newRate * item.quantity * 100) / 100,
+          references: {
+            ...item.references,
+            risks: newRisks,
+            notes: newNotes
+          }
+        };
+      }
+      return item;
+    });
+
+    setItems(updated);
+    saveWorkspaceState(updated);
+  };
+
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const activeProject = useMemo(() => projects.find(p => p.id === selectedProjectId), [projects, selectedProjectId]);
 
@@ -3318,20 +3390,72 @@ Office of Procurement`;
                           <div className="space-y-3">
                             <div>
                               <h4 className="text-xs font-extrabold text-zinc-200">{selectedItem.references.risks[0].riskDescription}</h4>
-                              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                                Identified contractual risk exposure. Risk status: <span className="font-bold text-rose-400">{selectedItem.references.risks[0].status}</span>
+                              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed flex items-center gap-1.5">
+                                Identified contractual risk exposure. Status:{" "}
+                                <span className={`font-extrabold px-1.5 py-0.5 rounded text-[9px] uppercase ${
+                                  selectedItem.references.risks[0].status === "Mitigated"
+                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                    : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                }`}>
+                                  {selectedItem.references.risks[0].status}
+                                </span>
                               </p>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1 text-[10px]">
                               <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900">
                                 <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-500 block mb-0.5">Mitigation Action Plan:</span>
-                                <p className="text-zinc-400 leading-normal">Require contractual liability caps. Include 3.5% contingency pricing buffer in sub-rate markup formulas.</p>
+                                <p className="text-zinc-400 leading-normal">
+                                  {selectedItem.references.risks[0].id === "rk-1"
+                                    ? "Add a delay penalty cap of 5% in contract and apply a 3.5% financing contingency rate buffer."
+                                    : selectedItem.references.risks[0].id === "rk-2"
+                                      ? "Map an extended 60-month warranty and apply a 5% manufacturer warranty risk reserve buffer."
+                                      : selectedItem.references.risks[0].id === "rk-3"
+                                        ? "Offset the 90-day progress payment credit terms by applying a 4% financing cost markup."
+                                        : selectedItem.references.risks[0].id === "rk-4"
+                                          ? "Cushion routing coordinates clash liability by applying a 3% design-risk buffer."
+                                          : selectedItem.references.risks[0].id === "rk-5"
+                                            ? "Offset fast-track double shift timeline schedule by applying a 6% overtime labor reserve buffer."
+                                            : "Negotiate liability caps in standard contract terms and apply a 3% contingency rate buffer."
+                                  }
+                                </p>
                               </div>
-                              <div className="bg-rose-950/10 p-2.5 rounded-lg border border-rose-500/10 flex flex-col justify-center">
-                                <span className="text-[8px] font-bold uppercase tracking-wider text-rose-400 block mb-0.5">Rate Contingency Impact:</span>
-                                <span className="text-sm font-extrabold text-rose-300">1.035x Markup</span>
-                                <span className="text-[8px] text-zinc-500 mt-0.5">Applied to standard baseline pricing to offset risk damages</span>
-                              </div>
+                              
+                              {selectedItem.references.risks[0].status === "Mitigated" ? (
+                                <div className="bg-emerald-950/15 p-2.5 rounded-lg border border-emerald-500/20 flex flex-col justify-center items-center text-center">
+                                  <span className="text-[14px] mb-0.5">🛡️</span>
+                                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-400">Risk Defended</span>
+                                  <button
+                                    onClick={() => handleMitigateRisk(selectedItem.id, selectedItem.references.risks[0].id, "restore")}
+                                    className="mt-2 text-[8px] font-extrabold text-zinc-400 hover:text-zinc-300 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 rounded transition-all cursor-pointer"
+                                  >
+                                    Restore Original Rate
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="bg-rose-950/10 p-2.5 rounded-lg border border-rose-500/10 flex flex-col justify-center items-center text-center">
+                                  <span className="text-[8px] font-bold uppercase tracking-wider text-rose-400 block mb-0.5">Contingency Buffer:</span>
+                                  <span className="text-xs font-extrabold text-rose-300">
+                                    {selectedItem.references.risks[0].id === "rk-1"
+                                      ? "+3.5% Rate Markup"
+                                      : selectedItem.references.risks[0].id === "rk-2"
+                                        ? "+5.0% Rate Markup"
+                                        : selectedItem.references.risks[0].id === "rk-3"
+                                          ? "+4.0% Rate Markup"
+                                          : selectedItem.references.risks[0].id === "rk-4"
+                                            ? "+3.0% Rate Markup"
+                                            : selectedItem.references.risks[0].id === "rk-5"
+                                              ? "+6.0% Rate Markup"
+                                              : "+3.0% Rate Markup"
+                                    }
+                                  </span>
+                                  <button
+                                    onClick={() => handleMitigateRisk(selectedItem.id, selectedItem.references.risks[0].id, "apply")}
+                                    className="mt-2 w-full text-[9px] font-extrabold text-white bg-rose-650 hover:bg-rose-700 active:scale-95 px-2 py-1.5 rounded-md border border-rose-500/20 transition-all flex items-center justify-center gap-1 cursor-pointer hover:shadow-md"
+                                  >
+                                    🛡️ Mitigate Risk
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ) : (
