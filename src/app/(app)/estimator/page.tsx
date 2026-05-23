@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import PageBreadcrumb from "@/app/(app)/_components/page-breadcrumb";
 import { fetchVendorQuotations, type LocalVendorQuotation } from "@/lib/tenders/quotations";
 
@@ -1642,7 +1642,7 @@ export default function MasterBoqWorkspace() {
                       const subtotal = categoryTotals[category];
 
                       return (
-                        <tr key={`group-${category}`} className="contents">
+                        <Fragment key={`group-${category}`}>
                           {/* COLLAPSIBLE GROUP HEADER */}
                           <tr className="bg-zinc-900/80 sticky z-10 font-bold text-zinc-300 hover:bg-zinc-900 transition">
                             <td colSpan={11} className="px-3 py-2 border-b border-zinc-800 border-t border-zinc-800">
@@ -1856,7 +1856,7 @@ export default function MasterBoqWorkspace() {
                               </tr>
                             );
                           })}
-                        </tr>
+                        </Fragment>
                       );
                     })}
                   </tbody>
