@@ -357,6 +357,7 @@ export default function MasterBoqWorkspace() {
   const [projectFiles, setProjectFiles] = useState<TenderFile[]>([]);
   const [autoLinkingLoading, setAutoLinkingLoading] = useState(false);
   const [activeRegion, setActiveRegion] = useState<string>("Mumbai");
+  const [subscribed, setSubscribed] = useState<boolean | null>(null);
   
   // Workflow variables
   const [currentUserRole, setCurrentUserRole] = useState<"junior" | "senior" | "procurement" | "admin">("junior");
@@ -894,6 +895,36 @@ Office of Procurement`;
     loadRealTenders();
   }, []);
 
+  // Check active SaaS subscription
+  useEffect(() => {
+    async function checkSubscription() {
+      try {
+        const supabase = createClient();
+        const { data: userSession } = await supabase.auth.getSession();
+        if (!userSession?.session) {
+          setSubscribed(false);
+          return;
+        }
+
+        const { data: subs, error } = await supabase
+          .from("subscriptions")
+          .select("*")
+          .eq("status", "active");
+
+        if (error) throw error;
+        if (subs && subs.length > 0) {
+          setSubscribed(true);
+        } else {
+          setSubscribed(false);
+        }
+      } catch (err) {
+        console.error("Subscription verification failed:", err);
+        setSubscribed(false);
+      }
+    }
+    checkSubscription();
+  }, [selectedProjectId]);
+
   // Seed default templates and revisions
   useEffect(() => {
     setLoading(true);
@@ -972,6 +1003,17 @@ Office of Procurement`;
 
   // AI Document Auto-Linker
   const handleAutoLink = async () => {
+    if (subscribed === false) {
+      toast.error("Upgrade Plan Required", {
+        description: "AI Document Auto-linking is a Professional Plan feature. Upgrade your workspace now!",
+        action: {
+          label: "Upgrade Plan",
+          onClick: () => window.location.href = "/pricing"
+        }
+      });
+      return;
+    }
+
     if (items.length === 0) {
       toast.warning("No items in workspace", {
         description: "Please extract or add BOQ items first.",
@@ -2070,6 +2112,42 @@ Office of Procurement`;
           </p>
         </div>
       </div>
+
+      {/* SaaS TRIAL / SUBSCRIPTION UPGRADE REMINDER BANNER */}
+      {subscribed === false && (
+        <div className="bg-gradient-to-r from-violet-950/20 via-zinc-950 to-zinc-950 border border-violet-500/30 rounded-2xl p-5 mb-6 relative overflow-hidden shadow-lg shadow-violet-950/10 animate-in slide-in-from-top-4 duration-300">
+          <div className="absolute right-0 top-0 h-24 w-24 bg-violet-500/5 blur-xl rounded-full pointer-events-none" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/25">
+                <span className="text-xl">⚠️</span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-violet-400">Standard Trial Workspace</span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+                  <span className="text-[9px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 uppercase">Upgrade Pending</span>
+                </div>
+                <h3 className="text-base font-bold text-zinc-150 mt-1">
+                  You are currently using the Standard Trial plan.
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Upgrade to the Professional Plan to unlock the AI Document Auto-Linker, advanced scanned PDF OCR structuring, and unlimited estimations!
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4.5 shrink-0 self-end md:self-center">
+              <button
+                type="button"
+                onClick={() => window.location.href = "/pricing"}
+                className="bg-violet-600 hover:bg-violet-500 active:scale-98 text-white font-bold rounded-xl px-4 py-2.5 text-xs uppercase tracking-wider transition cursor-pointer shadow-lg shadow-violet-600/10"
+              >
+                Upgrade to Pro Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI BID SAVINGS COCKPIT BANNER */}
       {savingsAnalysis && savingsAnalysis.totalSavings > 0 && (
