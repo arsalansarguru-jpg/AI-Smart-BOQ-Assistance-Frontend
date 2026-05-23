@@ -39,6 +39,15 @@ export type EstimateProject = {
   client: string;
 };
 
+export type SourcingVendor = {
+  name: string;
+  type: string;
+  presence: string;
+  contact_info: string;
+  sourcing_rating: string;
+  description: string;
+};
+
 // Git-style Revision Model
 export type BoqRevision = {
   id: string;
@@ -378,6 +387,18 @@ export default function MasterBoqWorkspace() {
   const [vendorQuotations, setVendorQuotations] = useState<LocalVendorQuotation[]>([]);
   const [loading, setLoading] = useState(true);
   const [reconciledIds, setReconciledIds] = useState<Set<string>>(new Set());
+
+  // AI Sourcing State
+  const [sourcingLoading, setSourcingLoading] = useState(false);
+  const [sourcingResults, setSourcingResults] = useState<SourcingVendor[] | null>(null);
+  const [sourcingError, setSourcingError] = useState<string | null>(null);
+  
+  // Clear sourcing when item selection changes
+  useEffect(() => {
+    setSourcingResults(null);
+    setSourcingError(null);
+    setSourcingLoading(false);
+  }, [selectedItemId]);
 
   const savingsAnalysis = useMemo(() => {
     if (items.length === 0 || vendorQuotations.length === 0) return null;
@@ -743,6 +764,78 @@ Office of Procurement`;
 
     setItems(updated);
     saveWorkspaceState(updated);
+  };
+
+  const handleDiscoverVendors = async () => {
+    if (!selectedItemId) return;
+    const boqItem = items.find(it => it.id === selectedItemId);
+    if (!boqItem) return;
+
+    setSourcingLoading(true);
+    setSourcingError(null);
+    setSourcingResults(null);
+
+    try {
+      const res = await fetch("/api/backend/sourcing/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: boqItem.description,
+          region: activeRegion,
+          category: boqItem.category
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to query sourcing directory.");
+      }
+
+      const data = await res.json();
+      setSourcingResults(data.vendors || []);
+    } catch (err) {
+      console.error("AI Sourcing search failed", err);
+      setSourcingError(err instanceof Error ? err.message : "Sourcing failed.");
+    } finally {
+      setSourcingLoading(false);
+    }
+  };
+
+  const handleLinkDiscoveredVendor = (vendor: SourcingVendor) => {
+    if (!selectedItemId) return;
+    const boqItem = items.find(it => it.id === selectedItemId);
+    if (!boqItem) return;
+
+    const defaultRate = boqItem.rate;
+    const vqId = `vq-ai-${Date.now()}`;
+    const newQuote = {
+      id: vqId,
+      vendorName: vendor.name,
+      quoteNumber: `AI-DIR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+      rate: defaultRate,
+      fileUrl: "#"
+    };
+
+    const updated = items.map(item => {
+      if (item.id === selectedItemId) {
+        const quotes = item.references.vendorQuotes || [];
+        if (quotes.some(q => q.vendorName === vendor.name)) return item; // Already linked
+        return {
+          ...item,
+          references: {
+            ...item.references,
+            vendorQuotes: [...quotes, newQuote]
+          }
+        };
+      }
+      return item;
+    });
+
+    setItems(updated);
+    saveWorkspaceState(updated);
+    
+    // Force update local results state to show linked indicator
+    setSourcingResults(prev => prev ? prev.filter(v => v.name !== vendor.name) : null);
   };
 
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -3499,41 +3592,121 @@ Office of Procurement`;
                     )}
 
                     {focusedGraphNode === "quote" && (
-                      <div className="text-left">
-                        <div className="flex justify-between items-center border-b border-zinc-900 pb-2 mb-3">
-                          <span className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-widest flex items-center gap-1">🤝 Competitive Supplier Bids & Vendor Quotations</span>
-                          <span className="text-[9px] text-zinc-500 font-bold">Procurement Comparison</span>
-                        </div>
-                        {selectedItem.references?.vendorQuotes && selectedItem.references.vendorQuotes.length > 0 ? (
-                          <div className="space-y-3">
-                            <p className="text-[11px] text-zinc-400 leading-normal">
-                              Active vendor quotations parsed and linked to this BOQ item for cost comparison:
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
-                              {selectedItem.references.vendorQuotes.map((q) => (
-                                <div key={q.id} className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900 flex justify-between items-start gap-2">
-                                  <div className="flex-1">
-                                    <span className="font-bold text-zinc-200">{q.vendorName}</span>
-                                    <p className="text-[9px] text-zinc-500 mt-0.5 font-mono">Quote Ref: {q.quoteNumber}</p>
-                                    <button
-                                      onClick={() => handleNegotiateEmail(q.vendorName, q.rate, q.quoteNumber)}
-                                      className="mt-2 text-[9px] font-extrabold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Generate and open a professional price matching negotiation email in your local client."
-                                    >
-                                      <span>✉</span> Negotiate Rate
-                                    </button>
-                                  </div>
-                                  <div className="text-right shrink-0">
-                                    <span className="font-extrabold text-emerald-400 text-xs block">{formatPrice(q.rate)}</span>
-                                    <span className="text-[8px] text-zinc-500">/{selectedItem.unit}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                      <div className="text-left space-y-4">
+                        <div>
+                          <div className="flex justify-between items-center border-b border-zinc-900 pb-2 mb-3">
+                            <span className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-widest flex items-center gap-1">🤝 Competitive Supplier Bids & Vendor Quotations</span>
+                            <span className="text-[9px] text-zinc-500 font-bold">Procurement Comparison</span>
                           </div>
-                        ) : (
-                          <div className="text-center py-6 text-zinc-500 italic text-xs">No active competitive vendor quotes linked to this BOQ row. Mapped quote prices appear here.</div>
-                        )}
+                          {selectedItem.references?.vendorQuotes && selectedItem.references.vendorQuotes.length > 0 ? (
+                            <div className="space-y-3">
+                              <p className="text-[11px] text-zinc-400 leading-normal">
+                                Active vendor quotations parsed and linked to this BOQ item for cost comparison:
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
+                                {selectedItem.references.vendorQuotes.map((q) => (
+                                  <div key={q.id} className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900 flex justify-between items-start gap-2">
+                                    <div className="flex-1">
+                                      <span className="font-bold text-zinc-200">{q.vendorName}</span>
+                                      <p className="text-[9px] text-zinc-500 mt-0.5 font-mono">Quote Ref: {q.quoteNumber}</p>
+                                      <button
+                                        onClick={() => handleNegotiateEmail(q.vendorName, q.rate, q.quoteNumber)}
+                                        className="mt-2 text-[9px] font-extrabold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer"
+                                        title="Generate and open a professional price matching negotiation email in your local client."
+                                      >
+                                        <span>✉</span> Negotiate Rate
+                                      </button>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <span className="font-extrabold text-emerald-400 text-xs block">{formatPrice(q.rate)}</span>
+                                      <span className="text-[8px] text-zinc-500">/{selectedItem.unit}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center py-6 text-zinc-500 italic text-xs">No active competitive vendor quotes linked to this BOQ row. Mapped quote prices appear here.</div>
+                          )}
+                        </div>
+
+                        {/* AI Vendor Discovery Directory */}
+                        <div className="border-t border-zinc-900 pt-4">
+                          <div className="flex justify-between items-center border-b border-zinc-900 pb-2 mb-3">
+                            <span className="text-[10px] font-extrabold text-indigo-400 uppercase tracking-widest flex items-center gap-1">🔮 AI Regional Vendor Sourcing Directory</span>
+                            <span className="text-[9px] text-zinc-500 font-bold">Region: {activeRegion}</span>
+                          </div>
+
+                          {sourcingResults && sourcingResults.length > 0 ? (
+                            <div className="space-y-3">
+                              <p className="text-[11px] text-zinc-400 leading-normal">
+                                Top-tier regional MEP suppliers discovered for this item description in <span className="text-indigo-400 font-bold">{activeRegion}</span>:
+                              </p>
+                              <div className="space-y-2 text-[10px]">
+                                {sourcingResults.map((v, idx) => (
+                                  <div key={idx} className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900 flex justify-between items-start gap-3 animate-fade-in">
+                                    <div className="flex-1 space-y-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="font-bold text-zinc-200 text-xs">{v.name}</span>
+                                        <span className="text-[8px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1 rounded font-bold uppercase">{v.type}</span>
+                                      </div>
+                                      <p className="text-[10px] text-zinc-400">{v.description}</p>
+                                      <div className="text-[9px] text-zinc-500 italic font-medium leading-relaxed bg-zinc-900/40 p-1.5 rounded border border-zinc-900">
+                                        <span className="text-zinc-400 font-bold uppercase text-[7px] tracking-wider block mb-0.5">Regional Logistics Support:</span> {v.presence}
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0 flex flex-col items-end gap-2">
+                                      <div className="bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-center shrink-0">
+                                        <span className="text-[7px] text-zinc-500 block uppercase font-bold tracking-wider">Rating</span>
+                                        <span className="font-extrabold text-indigo-400 text-xs">{v.sourcing_rating}</span>
+                                      </div>
+                                      <button
+                                        onClick={() => handleLinkDiscoveredVendor(v)}
+                                        className="text-[9px] font-extrabold text-white bg-indigo-600 hover:bg-indigo-750 px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer shadow active:scale-95 hover:shadow-indigo-500/10"
+                                      >
+                                        ➕ Link Bidder
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <button
+                                onClick={handleDiscoverVendors}
+                                className="w-full text-center py-2 text-[10px] font-bold text-zinc-500 hover:text-zinc-400 transition-all cursor-pointer border border-dashed border-zinc-800 rounded-lg bg-zinc-900/20 hover:bg-zinc-900/40"
+                              >
+                                Re-run AI Sourcing Directory Scan
+                              </button>
+                            </div>
+                          ) : sourcingLoading ? (
+                            <div className="space-y-3 py-4">
+                              <div className="flex items-center gap-2 text-zinc-400 text-[10px] justify-center animate-pulse">
+                                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping"></span>
+                                Generating regional procurement profile via Gemini...
+                              </div>
+                              <div className="space-y-2">
+                                <div className="h-20 bg-zinc-950/40 rounded-lg animate-pulse border border-zinc-900"></div>
+                                <div className="h-20 bg-zinc-950/40 rounded-lg animate-pulse border border-zinc-900"></div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                                No active vendor bids? Instantly query your Gemini AI directory to locate reputable local MEP/construction suppliers and distributors active in the <span className="font-bold text-indigo-400">{activeRegion}</span> region.
+                              </p>
+                              {sourcingError && (
+                                <p className="text-[10px] text-rose-400 bg-rose-500/5 p-2 rounded border border-rose-500/10 leading-normal">
+                                  {sourcingError}
+                                </p>
+                              )}
+                              <button
+                                onClick={handleDiscoverVendors}
+                                className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-extrabold text-[10px] py-2 rounded-xl transition-all shadow-md flex items-center justify-center gap-1 cursor-pointer hover:shadow-indigo-500/10 active:scale-95"
+                              >
+                                🔍 Find Regional Suppliers (Gemini AI)
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
