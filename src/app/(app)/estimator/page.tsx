@@ -278,6 +278,61 @@ function formatPrice(value: number | null | undefined): string {
   return `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function cleanString(str: string): string {
+  return (str || "").toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function getSimilarityScore(str1: string, str2: string): number {
+  const s1 = cleanString(str1);
+  const s2 = cleanString(str2);
+  if (!s1 || !s2) return 0;
+  if (s1 === s2) return 1.0;
+
+  const w1 = s1.split(" ");
+  const w2 = s2.split(" ");
+
+  const set1 = new Set(w1);
+  const set2 = new Set(w2);
+
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  const union = new Set([...set1, ...set2]);
+
+  const tokenScore = intersection.size / union.size;
+
+  const getBigrams = (s: string) => {
+    const bigrams = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) {
+      bigrams.add(s.slice(i, i + 2));
+    }
+    return bigrams;
+  };
+  const b1 = getBigrams(s1);
+  const b2 = getBigrams(s2);
+  const bInter = new Set([...b1].filter(x => b2.has(x)));
+  const bUnion = new Set([...b1, ...b2]);
+  const charScore = bUnion.size > 0 ? bInter.size / bUnion.size : 0;
+
+  let hybrid = tokenScore * 0.6 + charScore * 0.4;
+
+  const getNumbers = (s: string) => {
+    return s.match(/\b\d+\b|\b\d+c\b|\b\d+sqm\b/g) || [];
+  };
+  const n1 = getNumbers(s1);
+  const n2 = getNumbers(s2);
+  if (n1.length > 0 && n2.length > 0) {
+    const setN1 = new Set(n1);
+    const setN2 = new Set(n2);
+    const nInter = [...setN1].filter(x => setN2.has(x));
+    if (nInter.length === 0) {
+      hybrid *= 0.5;
+    } else {
+      hybrid = Math.min(1.0, hybrid + 0.15);
+    }
+  }
+
+  return Math.round(hybrid * 100) / 100;
+}
+
 export default function MasterBoqWorkspace() {
   const [projects, setProjects] = useState<EstimateProject[]>([
     { id: "default-mep-project", name: "Grand Plaza MEP Complex", region: "Mumbai", client: "Grand Plaza Developers Ltd" },
@@ -322,6 +377,103 @@ export default function MasterBoqWorkspace() {
   const [autosaveStatus, setAutosaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [vendorQuotations, setVendorQuotations] = useState<LocalVendorQuotation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reconciledIds, setReconciledIds] = useState<Set<string>>(new Set());
+
+  const savingsAnalysis = useMemo(() => {
+    if (items.length === 0 || vendorQuotations.length === 0) return null;
+
+    let totalSavings = 0;
+    const itemsToReconcile = [];
+
+    for (const boqItem of items) {
+      if (boqItem.status === "Approved") continue;
+      
+      let bestMatch: { rate: number; vendor: string; score: number } | null = null;
+
+      for (const q of vendorQuotations) {
+        for (const qItem of q.items) {
+          const score = getSimilarityScore(boqItem.description, qItem.item_name);
+          
+          if (score >= 0.65) {
+            if (!bestMatch || qItem.quoted_rate < bestMatch.rate) {
+              bestMatch = { rate: qItem.quoted_rate, vendor: q.vendor_name, score };
+            }
+          }
+        }
+      }
+
+      if (bestMatch && bestMatch.rate < boqItem.rate) {
+        const delta = boqItem.rate - bestMatch.rate;
+        const savings = delta * boqItem.quantity;
+        totalSavings += savings;
+        itemsToReconcile.push({
+          itemId: boqItem.id,
+          originalRate: boqItem.rate,
+          suggestedRate: bestMatch.rate,
+          vendorName: bestMatch.vendor,
+          savings
+        });
+      }
+    }
+
+    return {
+      totalSavings,
+      opportunitiesCount: itemsToReconcile.length,
+      itemsToReconcile
+    };
+  }, [items, vendorQuotations]);
+
+  const applyAiOptimizations = () => {
+    if (!savingsAnalysis || savingsAnalysis.itemsToReconcile.length === 0) return;
+    
+    const newItems = items.map(boqItem => {
+      const opportunity = savingsAnalysis.itemsToReconcile.find(opt => opt.itemId === boqItem.id);
+      if (opportunity) {
+        const matchingQuote = vendorQuotations.flatMap(q => 
+          q.items.map(it => ({ q, it }))
+        ).find(x => x.q.vendor_name === opportunity.vendorName && x.it.quoted_rate === opportunity.suggestedRate);
+        
+        const newVendorQuoteReference = matchingQuote ? {
+          id: matchingQuote.it.id || `vq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          vendorName: opportunity.vendorName,
+          quoteNumber: matchingQuote.q.id.substr(0, 8).toUpperCase(),
+          rate: opportunity.suggestedRate,
+          fileUrl: "#"
+        } : {
+          id: `vq-${Date.now()}`,
+          vendorName: opportunity.vendorName,
+          quoteNumber: "AI-OPT",
+          rate: opportunity.suggestedRate,
+          fileUrl: "#"
+        };
+
+        const currentQuotes = boqItem.references.vendorQuotes || [];
+        const quoteExists = currentQuotes.some(q => q.vendorName === opportunity.vendorName && q.rate === opportunity.suggestedRate);
+        const updatedQuotes = quoteExists ? currentQuotes : [...currentQuotes, newVendorQuoteReference];
+
+        return {
+          ...boqItem,
+          rate: opportunity.suggestedRate,
+          amount: opportunity.suggestedRate * boqItem.quantity,
+          selectedVendor: opportunity.vendorName,
+          references: {
+            ...boqItem.references,
+            vendorQuotes: updatedQuotes
+          }
+        };
+      }
+      return boqItem;
+    });
+
+    const optimizedIds = new Set(savingsAnalysis.itemsToReconcile.map(o => o.itemId));
+    setReconciledIds(optimizedIds);
+    setItems(newItems);
+    saveWorkspaceState(newItems);
+    
+    setTimeout(() => {
+      setReconciledIds(new Set());
+    }, 4000);
+  };
 
   // Relationship Map local states & toggle mappings
   const [sidebarTab, setSidebarTab] = useState<"specs" | "map">("specs");
@@ -1505,6 +1657,54 @@ export default function MasterBoqWorkspace() {
         </div>
       </div>
 
+      {/* AI BID SAVINGS COCKPIT BANNER */}
+      {savingsAnalysis && savingsAnalysis.totalSavings > 0 && (
+        <div className="bg-gradient-to-r from-emerald-950/20 via-zinc-950 to-zinc-950 border border-emerald-500/30 rounded-2xl p-5 mb-6 relative overflow-hidden shadow-lg shadow-emerald-950/10 animate-in slide-in-from-top-4 duration-300">
+          <div className="absolute right-0 top-0 h-24 w-24 bg-emerald-500/5 blur-xl rounded-full pointer-events-none" />
+          
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+              </div>
+              
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400">AI Bid Savings Engine</span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-[9px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 uppercase">Fuzzy-Match Optimization</span>
+                </div>
+                <h3 className="text-base font-bold text-zinc-150 mt-1">
+                  AI has matched <span className="text-emerald-400 font-extrabold">{savingsAnalysis.opportunitiesCount} items</span> to cheaper competing vendor quotations.
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Reconciling your estimated rates with these active quotes will instantly reduce your overall tender cost.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4.5 shrink-0 self-end md:self-center">
+              <div className="text-right">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block leading-none">Potential Savings</span>
+                <span className="text-2xl font-black text-emerald-400 tabular-nums tracking-tight mt-1.5 block">
+                  {formatPrice(savingsAnalysis.totalSavings)}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={applyAiOptimizations}
+                className="bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-zinc-950 font-black rounded-xl px-4 py-2.5 text-xs uppercase tracking-wider transition cursor-pointer shadow-lg shadow-emerald-500/10"
+              >
+                Apply AI Optimizations
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ACTIVE TABS CONDITIONAL LAYOUTS */}
 
       {/* ------------------------------------------------------------- */}
@@ -1734,9 +1934,11 @@ export default function MasterBoqWorkspace() {
                                 id={`workspace-row-${item.id}`}
                                 onClick={() => setSelectedItemId(item.id)}
                                 className={`divide-x divide-zinc-900 transition cursor-pointer ${
-                                  isSel
-                                    ? "bg-violet-950/20 hover:bg-violet-950/30 text-zinc-50 border-y border-violet-800/50 animate-in fade-in-10"
-                                    : "hover:bg-zinc-900/30 text-zinc-300"
+                                  reconciledIds.has(item.id)
+                                    ? "bg-emerald-950/25 text-emerald-100 shadow-inner border-y border-emerald-500/40 animate-pulse duration-1000"
+                                    : isSel
+                                      ? "bg-violet-950/20 hover:bg-violet-950/30 text-zinc-50 border-y border-violet-800/50 animate-in fade-in-10"
+                                      : "hover:bg-zinc-900/30 text-zinc-300"
                                 } ${hasWarning ? "bg-red-500/5" : ""} ${isDup ? "bg-yellow-500/5" : ""}`}
                               >
                                 {/* ITEM NUMBER */}
