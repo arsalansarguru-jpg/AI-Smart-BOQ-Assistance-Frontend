@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { toast } from "sonner";
 import type { ExtractResponse, StructureResponse, BoqLineItem } from "@/lib/api";
 import { exportBoqToExcel, structureExtractedBoq } from "@/lib/api";
 
@@ -305,14 +306,71 @@ function formatPrice(value: number | null | undefined): string {
 export default function ExtractionPreviewModal({
   data,
   projectName,
+  tenderProjectId,
   onClose,
 }: {
   data: ExtractResponse;
   projectName?: string;
+  tenderProjectId?: string;
   onClose: () => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [modalState, setModalState] = useState<ModalState>("raw_preview");
+  const [savingToWorkspace, setSavingToWorkspace] = useState(false);
+
+  const handleSaveToWorkspace = () => {
+    if (!tenderProjectId || editableItems.length === 0) return;
+    setSavingToWorkspace(true);
+    try {
+      const cacheKey = `boq_workspace_${tenderProjectId}`;
+      const revisionKey = `boq_revisions_${tenderProjectId}`;
+
+      const workspaceItems = editableItems.map((item) => ({
+        id: item.id,
+        item_no: item.item_no || "",
+        category: item.category || "Miscellaneous",
+        description: item.description,
+        unit: item.unit || "nos",
+        quantity: item.quantity ?? 0,
+        rate: item.rate ?? 0,
+        suggestedRate: item.rate ?? 0,
+        selectedVendor: "None",
+        amount: item.amount ?? 0,
+        confidence: item.confidence ?? 0.85,
+        approved: item.approved,
+        status: (item.approved ? "Approved" : "Draft") as any,
+        references: {
+          drawings: [],
+          makes: [],
+          notes: item.remarks || "",
+        },
+      }));
+
+      localStorage.setItem(cacheKey, JSON.stringify(workspaceItems));
+
+      const initialRevision = {
+        id: `rev-1-${Date.now()}`,
+        projectId: tenderProjectId,
+        versionNumber: "v1",
+        createdAt: new Date().toISOString(),
+        author: "AI Assistant",
+        comment: "Initial extracted BOQ from document upload",
+        items: workspaceItems,
+      };
+      localStorage.setItem(revisionKey, JSON.stringify([initialRevision]));
+
+      toast.success("Saved to Estimator Workspace!", {
+        description: `${workspaceItems.length} items successfully loaded.`,
+      });
+      onClose();
+    } catch (err) {
+      toast.error("Failed to save to workspace", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setSavingToWorkspace(false);
+    }
+  };
   const [exporting, setExporting] = useState(false);
   const [structureError, setStructureError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1359,6 +1417,24 @@ export default function ExtractionPreviewModal({
             <div className="flex flex-wrap justify-end gap-3 w-full sm:w-auto">
               {exportError && (
                 <span className="text-xs text-red-400 font-bold shrink-0 self-center">{exportError}</span>
+              )}
+
+              {tenderProjectId && (
+                <button
+                  type="button"
+                  onClick={handleSaveToWorkspace}
+                  disabled={savingToWorkspace || editableItems.length === 0}
+                  className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-700 px-6 py-3 text-xs font-bold text-white shadow-lg shadow-violet-600/20 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mr-2"
+                >
+                  {savingToWorkspace ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-2" />
+                      Saving to Workspace...
+                    </>
+                  ) : (
+                    "💾 Save to Estimator Workspace"
+                  )}
+                </button>
               )}
 
               <button

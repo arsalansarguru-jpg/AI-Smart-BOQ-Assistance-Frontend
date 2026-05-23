@@ -3,6 +3,10 @@
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import PageBreadcrumb from "@/app/(app)/_components/page-breadcrumb";
 import { fetchVendorQuotations, type LocalVendorQuotation } from "@/lib/tenders/quotations";
+import { createClient } from "@/lib/supabase/client";
+import { autoLinkProjectFiles } from "@/lib/api";
+import type { TenderFile } from "@/lib/types";
+import { toast } from "sonner";
 
 // Workspace BOQ Item Model
 export type WorkspaceBoqItem = {
@@ -350,6 +354,8 @@ export default function MasterBoqWorkspace() {
   ]);
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>("default-mep-project");
+  const [projectFiles, setProjectFiles] = useState<TenderFile[]>([]);
+  const [autoLinkingLoading, setAutoLinkingLoading] = useState(false);
   const [activeRegion, setActiveRegion] = useState<string>("Mumbai");
   
   // Workflow variables
@@ -854,6 +860,40 @@ Office of Procurement`;
     loadQuotations();
   }, []);
 
+  // Load real tender projects from Supabase on mount
+  useEffect(() => {
+    async function loadRealTenders() {
+      try {
+        const supabase = createClient();
+        const { data: userSession } = await supabase.auth.getSession();
+        if (!userSession?.session) return;
+
+        const { data: tenderProjects, error } = await supabase
+          .from("tender_projects")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        if (tenderProjects) {
+          const mapped = tenderProjects.map((tp: any) => ({
+            id: tp.id,
+            name: tp.tender_name,
+            region: "Mumbai", // default
+            client: tp.client_name
+          }));
+          setProjects(prev => {
+            const existingIds = new Set(mapped.map(m => m.id));
+            const filteredPrev = prev.filter(p => !existingIds.has(p.id));
+            return [...mapped, ...filteredPrev];
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch tender projects from Supabase:", err);
+      }
+    }
+    loadRealTenders();
+  }, []);
+
   // Seed default templates and revisions
   useEffect(() => {
     setLoading(true);
@@ -901,8 +941,116 @@ Office of Procurement`;
       seedRevisionsData(selectedProjectId, activeItemsList);
     }
 
+    // Fetch associated tender files if this is a custom project (UUID format)
+    async function loadFiles() {
+      try {
+        const supabase = createClient();
+        const { data: files } = await supabase
+          .from("tender_files")
+          .select("*")
+          .eq("tender_project_id", selectedProjectId);
+        if (files) {
+          setProjectFiles(files);
+        } else {
+          setProjectFiles([]);
+        }
+      } catch (err) {
+        console.error("Failed to load project files from Supabase:", err);
+        setProjectFiles([]);
+      }
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selectedProjectId);
+    if (isUuid) {
+      loadFiles();
+    } else {
+      setProjectFiles([]);
+    }
+
     setLoading(false);
   }, [selectedProjectId, projects]);
+
+  // AI Document Auto-Linker
+  const handleAutoLink = async () => {
+    if (items.length === 0) {
+      toast.warning("No items in workspace", {
+        description: "Please extract or add BOQ items first.",
+      });
+      return;
+    }
+
+    const drawings = projectFiles
+      .filter((f) => f.category === "drawings")
+      .map((f) => ({ id: f.id, file_name: f.file_name }));
+
+    const makeLists = projectFiles
+      .filter((f) => f.category === "make_list")
+      .map((f) => f.file_name);
+
+    if (drawings.length === 0 && makeLists.length === 0) {
+      toast.warning("No drawings or make lists", {
+        description: "Please upload drawings or make list files in the project repository first.",
+      });
+      return;
+    }
+
+    setAutoLinkingLoading(true);
+    const toastId = toast.loading("AI Auto-Linker is running...", {
+      description: `Analyzing ${items.length} items against ${drawings.length} drawings and make lists...`,
+    });
+
+    try {
+      const boqItemsReq = items.map((it) => ({
+        id: it.id,
+        description: it.description,
+        category: it.category,
+      }));
+
+      const res = await autoLinkProjectFiles({
+        items: boqItemsReq,
+        drawings,
+        make_list_brands: makeLists,
+      });
+
+      if (res && res.matches) {
+        const updatedItems = items.map((item) => {
+          const match = res.matches.find((m) => m.item_id === item.id);
+          if (match) {
+            return {
+              ...item,
+              references: {
+                ...item.references,
+                drawings: match.drawings || [],
+                makes: (match.makes || []).map((m: any) => ({
+                  brand: m.brand,
+                  status: (m.status === "Preferred" || m.status === "Alternative" ? m.status : "Approved") as "Approved" | "Preferred" | "Alternative",
+                })),
+                notes: match.notes || item.references.notes || "",
+              },
+            };
+          }
+          return item;
+        });
+
+        setItems(updatedItems);
+        // Save to cache
+        localStorage.setItem(`boq_workspace_${selectedProjectId}`, JSON.stringify(updatedItems));
+
+        toast.success("AI Document Auto-linking completed successfully!", {
+          id: toastId,
+          description: `Successfully linked relevant drawings and brands to your BOQ rows.`,
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("AI Auto-linking failed", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Please try again later.",
+      });
+    } finally {
+      setAutoLinkingLoading(false);
+    }
+  };
 
   const seedProjectData = (projId: string): WorkspaceBoqItem[] => {
     let seeded: WorkspaceBoqItem[] = [];
@@ -1746,6 +1894,47 @@ Office of Procurement`;
 
         {/* CONTROLS TOOLBAR */}
         <div className="flex flex-wrap items-center gap-4">
+
+          {/* ACTIVE PROJECT SELECTOR */}
+          <div className="flex flex-col">
+            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Active Project</label>
+            <select
+              value={selectedProjectId}
+              onChange={(e) => {
+                setSelectedProjectId(e.target.value);
+              }}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-extrabold text-violet-400 outline-none focus:border-violet-600 transition max-w-[200px]"
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* AI AUTO-LINKER ACTION BUTTON */}
+          <div className="flex flex-col">
+            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">AI Document Automation</label>
+            <button
+              onClick={handleAutoLink}
+              disabled={autoLinkingLoading || items.length === 0}
+              className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
+                autoLinkingLoading
+                  ? "bg-violet-950 border border-zinc-800 text-zinc-400"
+                  : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-violet-600/10"
+              }`}
+            >
+              {autoLinkingLoading ? (
+                <>
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
+                  Linking Documents...
+                </>
+              ) : (
+                <>🔗 Auto-Link Project Documents via AI</>
+              )}
+            </button>
+          </div>
           
           {/* ROLE SELECTOR SWITCHER */}
           <div className="flex flex-col">

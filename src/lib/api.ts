@@ -194,6 +194,60 @@ export async function exportBoqToExcel(
   downloadBlob(blob, filename);
 }
 
+export type AutoLinkItemRequest = {
+  id: string;
+  description: string;
+  category?: string | null;
+};
+
+export type AutoLinkDrawingRequest = {
+  id: string;
+  file_name: string;
+};
+
+export type AutoLinkRequest = {
+  items: AutoLinkItemRequest[];
+  drawings: AutoLinkDrawingRequest[];
+  make_list_brands: string[];
+};
+
+export type AutoLinkMatchResponse = {
+  item_id: string;
+  drawings: {
+    id: string;
+    sheetNumber: string;
+    title: string;
+    fileUrl: string;
+  }[];
+  makes: {
+    brand: string;
+    status: string;
+  }[];
+  notes: string;
+};
+
+export type AutoLinkResponse = {
+  matches: AutoLinkMatchResponse[];
+};
+
+export async function autoLinkProjectFiles(
+  payload: AutoLinkRequest
+): Promise<AutoLinkResponse> {
+  const res = await fetch(`${API_BASE}/api/sourcing/auto-link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      await readApiErrorMessage(res, `AI Auto-linking failed (${res.status})`)
+    );
+  }
+
+  return res.json() as Promise<AutoLinkResponse>;
+}
+
 export async function checkApiHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
@@ -202,3 +256,4 @@ export async function checkApiHealth(): Promise<boolean> {
     return false;
   }
 }
+

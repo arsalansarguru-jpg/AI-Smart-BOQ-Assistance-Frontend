@@ -104,6 +104,7 @@ export default function TenderExtractButton({
         <ExtractionPreviewModal
           data={preview}
           projectName={projectName}
+          tenderProjectId={file.tender_project_id}
           onClose={() => setPreview(null)}
         />
       ) : null}
