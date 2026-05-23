@@ -1187,15 +1187,32 @@ Office of Procurement`;
         category: it.category,
       }));
 
-      const res = await autoLinkProjectFiles({
-        items: boqItemsReq,
-        drawings,
-        make_list_brands: makeLists,
-      });
+      const batchSize = 5;
+      const totalItems = boqItemsReq.length;
+      const allMatches: any[] = [];
 
-      if (res && res.matches) {
+      for (let i = 0; i < totalItems; i += batchSize) {
+        const batchItems = boqItemsReq.slice(i, i + batchSize);
+        const progressPercent = Math.round((i / totalItems) * 100);
+        
+        toast.loading(`Auto-linking items ${i + 1} to ${Math.min(i + batchSize, totalItems)} of ${totalItems}... (${progressPercent}%)`, {
+          id: toastId
+        });
+
+        const res = await autoLinkProjectFiles({
+          items: batchItems,
+          drawings,
+          make_list_brands: makeLists,
+        });
+
+        if (res && res.matches) {
+          allMatches.push(...res.matches);
+        }
+      }
+
+      if (allMatches.length > 0) {
         const updatedItems = items.map((item) => {
-          const match = res.matches.find((m) => m.item_id === item.id);
+          const match = allMatches.find((m) => m.item_id === item.id);
           if (match) {
             return {
               ...item,
@@ -1219,7 +1236,11 @@ Office of Procurement`;
 
         toast.success("AI Document Auto-linking completed successfully!", {
           id: toastId,
-          description: `Successfully linked relevant drawings and brands to your BOQ rows.`,
+          description: `Successfully linked relevant drawings and brands to all your BOQ rows.`,
+        });
+      } else {
+        toast.warning("AI Auto-linking completed with no matches.", {
+          id: toastId,
         });
       }
     } catch (err) {
