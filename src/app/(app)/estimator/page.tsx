@@ -1032,6 +1032,11 @@ Office of Procurement`;
   // Check active SaaS subscription
   useEffect(() => {
     async function checkSubscription() {
+      if (process.env.NEXT_PUBLIC_BYPASS_SUBSCRIPTION === "true") {
+        setSubscribed(true);
+        return;
+      }
+
       try {
         const supabase = createClient();
         const { data: userSession } = await supabase.auth.getSession();
