@@ -613,6 +613,66 @@ export default function MasterBoqWorkspace() {
     saveWorkspaceState(updated);
   };
 
+  const handleNegotiateEmail = (vendorName: string, currentRate: number, quoteNumber: string) => {
+    if (!selectedItemId) return;
+    const boqItem = items.find(it => it.id === selectedItemId);
+    if (!boqItem) return;
+
+    // Find if there is a cheaper competitor rate in vendor quotes
+    const competitorQuotes = boqItem.references.vendorQuotes || [];
+    const cheaperCompetitor = competitorQuotes
+      .filter(q => q.vendorName !== vendorName && q.rate < currentRate)
+      .sort((a, b) => a.rate - b.rate)[0];
+
+    // Find suggested/historical rate
+    const historicalRec = getHistoricalRates(boqItem.description, boqItem.category);
+    const historicalRate = historicalRec ? historicalRec.suggestedRate : null;
+
+    // Determine target rate to negotiate towards
+    let targetRate = currentRate;
+    let rateSource = "";
+
+    if (cheaperCompetitor) {
+      targetRate = cheaperCompetitor.rate;
+      rateSource = `competitor bid (from ${cheaperCompetitor.vendorName})`;
+    } else if (historicalRate && historicalRate < currentRate) {
+      targetRate = historicalRate;
+      rateSource = `our historical project database average`;
+    } else {
+      // Fallback: request a standard 10% volume discount
+      targetRate = Math.round(currentRate * 0.9);
+      rateSource = `volume-discount benchmarks`;
+    }
+
+    const projectName = activeProject ? activeProject.name : "our current construction development";
+    const clientName = activeProject ? activeProject.client : "our client";
+
+    const mailSubject = `Price Match Request - ${boqItem.description} (Ref: ${quoteNumber})`;
+    const mailBody = `Dear ${vendorName} Sales Team,
+
+We are currently reviewing vendor bids for the ${boqItem.category} package on our project "${projectName}" for ${clientName}.
+
+We received your quotation (Ref: ${quoteNumber}) for the following line item:
+- Item: ${boqItem.description}
+- Quantity: ${boqItem.quantity} ${boqItem.unit}
+- Quoted Rate: ₹${currentRate.toLocaleString("en-IN")}/${boqItem.unit}
+
+We highly value your brand reputation and quality of service, and would prefer to award this contract to you. However, we have received a competitive rate of ₹${targetRate.toLocaleString("en-IN")}/${boqItem.unit} based on ${rateSource}.
+
+Would you be open to matching this target rate of ₹${targetRate.toLocaleString("en-IN")}/${boqItem.unit} for this order? Matching this rate would allow us to proceed with issuing the purchase order to you immediately.
+
+We look forward to your positive response by the end of this week so we can finalize the contract.
+
+Best regards,
+
+Procurement & Estimating Team
+${projectName}
+Office of Procurement`;
+
+    const mailtoUrl = `mailto:sales@${vendorName.toLowerCase().replace(/[^a-z0-9]/g, "")}.com?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(mailBody)}`;
+    window.open(mailtoUrl);
+  };
+
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const activeProject = useMemo(() => projects.find(p => p.id === selectedProjectId), [projects, selectedProjectId]);
 
@@ -3324,12 +3384,19 @@ export default function MasterBoqWorkspace() {
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
                               {selectedItem.references.vendorQuotes.map((q) => (
-                                <div key={q.id} className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900 flex justify-between items-center">
-                                  <div>
+                                <div key={q.id} className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900 flex justify-between items-start gap-2">
+                                  <div className="flex-1">
                                     <span className="font-bold text-zinc-200">{q.vendorName}</span>
-                                    <p className="text-[9px] text-zinc-500 mt-0.5">Quote Ref: {q.quoteNumber}</p>
+                                    <p className="text-[9px] text-zinc-500 mt-0.5 font-mono">Quote Ref: {q.quoteNumber}</p>
+                                    <button
+                                      onClick={() => handleNegotiateEmail(q.vendorName, q.rate, q.quoteNumber)}
+                                      className="mt-2 text-[9px] font-extrabold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Generate and open a professional price matching negotiation email in your local client."
+                                    >
+                                      <span>✉</span> Negotiate Rate
+                                    </button>
                                   </div>
-                                  <div className="text-right">
+                                  <div className="text-right shrink-0">
                                     <span className="font-extrabold text-emerald-400 text-xs block">{formatPrice(q.rate)}</span>
                                     <span className="text-[8px] text-zinc-500">/{selectedItem.unit}</span>
                                   </div>
