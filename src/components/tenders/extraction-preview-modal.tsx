@@ -125,7 +125,32 @@ const HISTORICAL_RATES_DB: HistoricalRateRecord[] = [
     ]
   },
   {
-    keywords: ["cctv", "camera", "pa", "elv", "speaker", "network", "cable"],
+    keywords: ["cable", "xlpe", "armoured", "4c", "sq.mm", "core", "polycab", "finolex", "havells"],
+    suggestedRate: 425,
+    unit: "mtr",
+    basedOnProject: "Phoenix Asia Tower",
+    basedOnVendor: "Polycab India",
+    updatedDaysAgo: 3,
+    city: "Mumbai",
+    vendorComparison: [
+      { vendor: "Polycab India", rate: 425, date: "3 days ago" },
+      { vendor: "Finolex Cables", rate: 440, date: "6 days ago" },
+      { vendor: "Havells India", rate: 465, date: "10 days ago" }
+    ],
+    projectHistory: [
+      { project: "Phoenix Asia Tower", city: "Mumbai", rate: 425, date: "3 days ago" },
+      { project: "Amazon Tech Park", city: "Bangalore", rate: 435, date: "1 month ago" },
+      { project: "Delhi Metro Extension", city: "Delhi", rate: 415, date: "2 months ago" }
+    ],
+    timeline: [
+      { date: "6m ago", rate: 390 },
+      { date: "4m ago", rate: 410 },
+      { date: "2m ago", rate: 420 },
+      { date: "Current", rate: 425 }
+    ]
+  },
+  {
+    keywords: ["cctv", "camera", "pa", "elv", "speaker", "network", "cat6", "rj45", "coaxial", "signal cable"],
     suggestedRate: 4800,
     unit: "nos",
     basedOnProject: "Corporate HQ Tower",
