@@ -1138,7 +1138,7 @@ export default function ExtractionPreviewModal({
 
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-0.5">Rate ($)</label>
+                            <label className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-0.5">Rate (₹)</label>
                             <input
                               type="number"
                               value={selectedItem.rate ?? ""}

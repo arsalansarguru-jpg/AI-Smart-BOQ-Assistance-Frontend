@@ -8,7 +8,7 @@ interface TenderRiskConsoleProps {
   projectId: string;
 }
 
-const TENDER_VALUE = 1250000; // Simulated $1.25M tender value for financial buffer calculation
+const TENDER_VALUE = 1250000; // Simulated ₹12.5L tender value for financial buffer calculation
 
 const CATEGORY_LABELS: Record<TenderRiskCategory, string> = {
   payment: "Payment Terms",
@@ -448,7 +448,7 @@ export default function TenderRiskConsole({ projectId }: TenderRiskConsoleProps)
             <div>
               <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Tender Estimate</div>
               <div className="text-sm font-bold text-white font-mono mt-0.5">
-                ${TENDER_VALUE.toLocaleString()}
+                ₹{TENDER_VALUE.toLocaleString("en-IN")}
               </div>
             </div>
             <div>
@@ -460,7 +460,7 @@ export default function TenderRiskConsole({ projectId }: TenderRiskConsoleProps)
             <div>
               <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Buffer Cost</div>
               <div className="text-sm font-bold text-emerald-400 font-mono mt-0.5">
-                +${financialBuffer.cash.toLocaleString()}
+                +₹{financialBuffer.cash.toLocaleString("en-IN")}
               </div>
             </div>
             <div>
@@ -708,7 +708,7 @@ export default function TenderRiskConsole({ projectId }: TenderRiskConsoleProps)
                           Pricing Risk Premium Premium
                         </h4>
                         <span className="text-xs font-mono font-bold text-emerald-400">
-                          +{bufferInput}% (+${((bufferInput / 100) * TENDER_VALUE).toLocaleString()})
+                          +{bufferInput}% (+₹{((bufferInput / 100) * TENDER_VALUE).toLocaleString("en-IN")})
                         </span>
                       </div>
                       <p className="text-[11px] text-zinc-500 mb-3 leading-relaxed">
