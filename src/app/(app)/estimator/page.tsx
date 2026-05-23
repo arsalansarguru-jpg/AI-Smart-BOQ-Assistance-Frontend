@@ -3372,97 +3372,100 @@ Office of Procurement`;
                       </div>
                     )}
 
-                    {focusedGraphNode === "risk" && (
-                      <div className="text-left">
-                        <div className="flex justify-between items-center border-b border-zinc-900 pb-2 mb-3">
-                          <span className="text-[10px] font-extrabold text-rose-400 uppercase tracking-widest flex items-center gap-1">⚠ AI-Generated Tender Risk Summary</span>
-                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase border ${
-                            selectedItem.references?.risks?.[0]?.severity === "high"
-                              ? "bg-red-500/10 text-red-400 border-red-500/20"
-                              : selectedItem.references?.risks?.[0]?.severity === "medium"
-                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                          }`}>
-                            Severity: {selectedItem.references?.risks?.[0]?.severity || "Low"}
-                          </span>
-                        </div>
-                        {selectedItem.references?.risks?.[0] ? (
-                          <div className="space-y-3">
-                            <div>
-                              <h4 className="text-xs font-extrabold text-zinc-200">{selectedItem.references.risks[0].riskDescription}</h4>
-                              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed flex items-center gap-1.5">
-                                Identified contractual risk exposure. Status:{" "}
-                                <span className={`font-extrabold px-1.5 py-0.5 rounded text-[9px] uppercase ${
-                                  selectedItem.references.risks[0].status === "Mitigated"
-                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                    : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                                }`}>
-                                  {selectedItem.references.risks[0].status}
-                                </span>
-                              </p>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1 text-[10px]">
-                              <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900">
-                                <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-500 block mb-0.5">Mitigation Action Plan:</span>
-                                <p className="text-zinc-400 leading-normal">
-                                  {selectedItem.references.risks[0].id === "rk-1"
-                                    ? "Add a delay penalty cap of 5% in contract and apply a 3.5% financing contingency rate buffer."
-                                    : selectedItem.references.risks[0].id === "rk-2"
-                                      ? "Map an extended 60-month warranty and apply a 5% manufacturer warranty risk reserve buffer."
-                                      : selectedItem.references.risks[0].id === "rk-3"
-                                        ? "Offset the 90-day progress payment credit terms by applying a 4% financing cost markup."
-                                        : selectedItem.references.risks[0].id === "rk-4"
-                                          ? "Cushion routing coordinates clash liability by applying a 3% design-risk buffer."
-                                          : selectedItem.references.risks[0].id === "rk-5"
-                                            ? "Offset fast-track double shift timeline schedule by applying a 6% overtime labor reserve buffer."
-                                            : "Negotiate liability caps in standard contract terms and apply a 3% contingency rate buffer."
-                                  }
+                    {focusedGraphNode === "risk" && (() => {
+                      const activeRisk = selectedItem.references?.risks?.[0];
+                      return (
+                        <div className="text-left">
+                          <div className="flex justify-between items-center border-b border-zinc-900 pb-2 mb-3">
+                            <span className="text-[10px] font-extrabold text-rose-400 uppercase tracking-widest flex items-center gap-1">⚠ AI-Generated Tender Risk Summary</span>
+                            <span className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase border ${
+                              activeRisk?.severity === "high"
+                                ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                : activeRisk?.severity === "medium"
+                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            }`}>
+                              Severity: {activeRisk?.severity || "Low"}
+                            </span>
+                          </div>
+                          {activeRisk ? (
+                            <div className="space-y-3">
+                              <div>
+                                <h4 className="text-xs font-extrabold text-zinc-200">{activeRisk.riskDescription}</h4>
+                                <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed flex items-center gap-1.5">
+                                  Identified contractual risk exposure. Status:{" "}
+                                  <span className={`font-extrabold px-1.5 py-0.5 rounded text-[9px] uppercase ${
+                                    activeRisk.status === "Mitigated"
+                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                      : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  }`}>
+                                    {activeRisk.status}
+                                  </span>
                                 </p>
                               </div>
-                              
-                              {selectedItem.references.risks[0].status === "Mitigated" ? (
-                                <div className="bg-emerald-950/15 p-2.5 rounded-lg border border-emerald-500/20 flex flex-col justify-center items-center text-center">
-                                  <span className="text-[14px] mb-0.5">🛡️</span>
-                                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-400">Risk Defended</span>
-                                  <button
-                                    onClick={() => handleMitigateRisk(selectedItem.id, selectedItem.references.risks[0].id, "restore")}
-                                    className="mt-2 text-[8px] font-extrabold text-zinc-400 hover:text-zinc-300 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 rounded transition-all cursor-pointer"
-                                  >
-                                    Restore Original Rate
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="bg-rose-950/10 p-2.5 rounded-lg border border-rose-500/10 flex flex-col justify-center items-center text-center">
-                                  <span className="text-[8px] font-bold uppercase tracking-wider text-rose-400 block mb-0.5">Contingency Buffer:</span>
-                                  <span className="text-xs font-extrabold text-rose-300">
-                                    {selectedItem.references.risks[0].id === "rk-1"
-                                      ? "+3.5% Rate Markup"
-                                      : selectedItem.references.risks[0].id === "rk-2"
-                                        ? "+5.0% Rate Markup"
-                                        : selectedItem.references.risks[0].id === "rk-3"
-                                          ? "+4.0% Rate Markup"
-                                          : selectedItem.references.risks[0].id === "rk-4"
-                                            ? "+3.0% Rate Markup"
-                                            : selectedItem.references.risks[0].id === "rk-5"
-                                              ? "+6.0% Rate Markup"
-                                              : "+3.0% Rate Markup"
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1 text-[10px]">
+                                <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900">
+                                  <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-500 block mb-0.5">Mitigation Action Plan:</span>
+                                  <p className="text-zinc-400 leading-normal">
+                                    {activeRisk.id === "rk-1"
+                                      ? "Add a delay penalty cap of 5% in contract and apply a 3.5% financing contingency rate buffer."
+                                      : activeRisk.id === "rk-2"
+                                        ? "Map an extended 60-month warranty and apply a 5% manufacturer warranty risk reserve buffer."
+                                        : activeRisk.id === "rk-3"
+                                          ? "Offset the 90-day progress payment credit terms by applying a 4% financing cost markup."
+                                          : activeRisk.id === "rk-4"
+                                            ? "Cushion routing coordinates clash liability by applying a 3% design-risk buffer."
+                                            : activeRisk.id === "rk-5"
+                                              ? "Offset fast-track double shift timeline schedule by applying a 6% overtime labor reserve buffer."
+                                              : "Negotiate liability caps in standard contract terms and apply a 3% contingency rate buffer."
                                     }
-                                  </span>
-                                  <button
-                                    onClick={() => handleMitigateRisk(selectedItem.id, selectedItem.references.risks[0].id, "apply")}
-                                    className="mt-2 w-full text-[9px] font-extrabold text-white bg-rose-650 hover:bg-rose-700 active:scale-95 px-2 py-1.5 rounded-md border border-rose-500/20 transition-all flex items-center justify-center gap-1 cursor-pointer hover:shadow-md"
-                                  >
-                                    🛡️ Mitigate Risk
-                                  </button>
+                                  </p>
                                 </div>
-                              )}
+                                
+                                {activeRisk.status === "Mitigated" ? (
+                                  <div className="bg-emerald-950/15 p-2.5 rounded-lg border border-emerald-500/20 flex flex-col justify-center items-center text-center">
+                                    <span className="text-[14px] mb-0.5">🛡️</span>
+                                    <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-400">Risk Defended</span>
+                                    <button
+                                      onClick={() => handleMitigateRisk(selectedItem.id, activeRisk.id, "restore")}
+                                      className="mt-2 text-[8px] font-extrabold text-zinc-400 hover:text-zinc-300 bg-zinc-800 hover:bg-zinc-700 px-2 py-1 rounded transition-all cursor-pointer"
+                                    >
+                                      Restore Original Rate
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="bg-rose-950/10 p-2.5 rounded-lg border border-rose-500/10 flex flex-col justify-center items-center text-center">
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-rose-400 block mb-0.5">Contingency Buffer:</span>
+                                    <span className="text-xs font-extrabold text-rose-300">
+                                      {activeRisk.id === "rk-1"
+                                        ? "+3.5% Rate Markup"
+                                        : activeRisk.id === "rk-2"
+                                          ? "+5.0% Rate Markup"
+                                          : activeRisk.id === "rk-3"
+                                            ? "+4.0% Rate Markup"
+                                            : activeRisk.id === "rk-4"
+                                              ? "+3.0% Rate Markup"
+                                              : activeRisk.id === "rk-5"
+                                                ? "+6.0% Rate Markup"
+                                                : "+3.0% Rate Markup"
+                                      }
+                                    </span>
+                                    <button
+                                      onClick={() => handleMitigateRisk(selectedItem.id, activeRisk.id, "apply")}
+                                      className="mt-2 w-full text-[9px] font-extrabold text-white bg-rose-650 hover:bg-rose-700 active:scale-95 px-2 py-1.5 rounded-md border border-rose-500/20 transition-all flex items-center justify-center gap-1 cursor-pointer hover:shadow-md"
+                                    >
+                                      🛡️ Mitigate Risk
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ) : (
-                          <div className="text-center py-6 text-zinc-500 italic text-xs">No active risk findings attached to this row. Use the sidebar Linker tab to run audits and assign findings.</div>
-                        )}
-                      </div>
-                    )}
+                          ) : (
+                            <div className="text-center py-6 text-zinc-500 italic text-xs">No active risk findings attached to this row. Use the sidebar Linker tab to run audits and assign findings.</div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {focusedGraphNode === "make" && (
                       <div className="text-left">
