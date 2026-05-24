@@ -2192,13 +2192,13 @@ Office of Procurement`;
             </select>
           </div>
 
-          {/* CUSTOM GEMINI API KEY INPUT */}
+          {/* CUSTOM GEMINI / KIMI API KEY INPUT */}
           <div className="flex flex-col">
-            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Custom Gemini API Key</label>
+            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Custom Gemini / Kimi API Key</label>
             <div className="relative flex items-center">
               <input
                 type="password"
-                placeholder="Bypass Daily Quota (AIzaSy...)"
+                placeholder="Bypass Daily Quota (AIzaSy... or sk-...)"
                 value={customApiKey}
                 onChange={(e) => {
                   const key = e.target.value;
