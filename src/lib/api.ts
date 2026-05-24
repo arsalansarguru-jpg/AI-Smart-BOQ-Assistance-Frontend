@@ -230,12 +230,25 @@ export type AutoLinkResponse = {
   matches: AutoLinkMatchResponse[];
 };
 
+function getHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (typeof window !== "undefined") {
+    const customKey = localStorage.getItem("custom_gemini_api_key");
+    if (customKey && customKey.trim()) {
+      headers["X-Gemini-API-Key"] = customKey.trim();
+    }
+  }
+  return headers;
+}
+
 export async function autoLinkProjectFiles(
   payload: AutoLinkRequest
 ): Promise<AutoLinkResponse> {
   const res = await fetch(`${API_BASE}/api/sourcing/auto-link`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(payload),
   });
 
@@ -269,7 +282,7 @@ export async function matchPriceListCatalog(
 ): Promise<PriceListMatchResponse> {
   const res = await fetch(`${API_BASE}/api/sourcing/match-price-list`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(payload),
   });
 

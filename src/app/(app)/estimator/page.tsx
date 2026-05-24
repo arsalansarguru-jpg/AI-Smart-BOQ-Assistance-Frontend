@@ -426,6 +426,14 @@ export default function MasterBoqWorkspace() {
   const [loading, setLoading] = useState(true);
   const [reconciledIds, setReconciledIds] = useState<Set<string>>(new Set());
 
+  // Custom API Key to bypass unverified Daily Quota Limits
+  const [customApiKey, setCustomApiKey] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("custom_gemini_api_key") || "";
+    }
+    return "";
+  });
+
   // AI Sourcing State
   const [sourcingLoading, setSourcingLoading] = useState(false);
   const [sourcingResults, setSourcingResults] = useState<SourcingVendor[] | null>(null);
@@ -815,9 +823,15 @@ Office of Procurement`;
     setSourcingResults(null);
 
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const customKey = localStorage.getItem("custom_gemini_api_key");
+      if (customKey && customKey.trim()) {
+        headers["X-Gemini-API-Key"] = customKey.trim();
+      }
+
       const res = await fetch("/api/backend/sourcing/discover", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           description: boqItem.description,
           region: activeRegion,
@@ -2169,13 +2183,48 @@ Office of Procurement`;
                 // Auto lock boq if admin switch
                 if (role !== "admin") setBoqLocked(false);
               }}
-              className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-extrabold text-violet-400 outline-none focus:border-violet-600 transition"
+              className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-extrabold text-violet-400 outline-none focus:border-violet-600 transition h-[32px]"
             >
               <option value="junior">Junior Estimator (Drafts)</option>
               <option value="senior">Senior Estimator (Reviews)</option>
               <option value="procurement">Procurement Manager (Bids)</option>
               <option value="admin">Administrator (Lock & Release)</option>
             </select>
+          </div>
+
+          {/* CUSTOM GEMINI API KEY INPUT */}
+          <div className="flex flex-col">
+            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Custom Gemini API Key</label>
+            <div className="relative flex items-center">
+              <input
+                type="password"
+                placeholder="Bypass Daily Quota (AIzaSy...)"
+                value={customApiKey}
+                onChange={(e) => {
+                  const key = e.target.value;
+                  setCustomApiKey(key);
+                  if (key.trim()) {
+                    localStorage.setItem("custom_gemini_api_key", key.trim());
+                  } else {
+                    localStorage.removeItem("custom_gemini_api_key");
+                  }
+                }}
+                className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 pr-8 text-xs font-bold text-violet-400 placeholder-zinc-600 outline-none focus:border-violet-600 transition w-[210px] h-[32px]"
+              />
+              {customApiKey && (
+                <button
+                  onClick={() => {
+                    setCustomApiKey("");
+                    localStorage.removeItem("custom_gemini_api_key");
+                    toast.success("Custom API key cleared. Reverting to shared server key.");
+                  }}
+                  className="absolute right-2.5 text-zinc-500 hover:text-zinc-300 text-[10px] font-bold cursor-pointer"
+                  title="Clear Custom Key"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* ADMIN CONSOLE ACTION */}
