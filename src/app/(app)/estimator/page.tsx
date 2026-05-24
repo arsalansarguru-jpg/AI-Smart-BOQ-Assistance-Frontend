@@ -1187,7 +1187,7 @@ Office of Procurement`;
         category: it.category,
       }));
 
-      const batchSize = 5;
+      const batchSize = 25;
       const totalItems = boqItemsReq.length;
       const allMatches: any[] = [];
 
@@ -1198,6 +1198,11 @@ Office of Procurement`;
         toast.loading(`Auto-linking items ${i + 1} to ${Math.min(i + batchSize, totalItems)} of ${totalItems}... (${progressPercent}%)`, {
           id: toastId
         });
+
+        // Add 1200ms delay between consecutive batches to respect rate limits
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+        }
 
         const res = await autoLinkProjectFiles({
           items: batchItems,
