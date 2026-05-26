@@ -88,13 +88,13 @@ export const TENDER_CATEGORY_CONFIG: Record<
   },
   make_list: {
     category: "make_list",
-    title: "Make List Files",
+    title: "Make Lists & Supplier Price Lists / Catalogs",
     description:
-      "Upload approved makes, specifications, and vendor documentation.",
+      "Upload approved manufacturer makes, supplier catalogs, and retail price list PDFs.",
     hints: [
-      "Approved make lists",
+      "Approved manufacturer makes",
+      "Supplier price lists & catalogs (.pdf, .xls)",
       "Material specification sheets",
-      "Vendor lists",
     ],
     accept:
       ".pdf,.xls,.xlsx,.doc,.docx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/csv",

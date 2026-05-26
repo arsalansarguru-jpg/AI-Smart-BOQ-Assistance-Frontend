@@ -18,7 +18,14 @@ const HOP_BY_HOP = new Set([
 
 function buildTargetUrl(pathSegments: string[], search: string): string {
   const base = getServerBackendUrl();
-  const path = pathSegments.map(encodeURIComponent).join("/");
+  
+  // Strip duplicate 'api' segment if it's the first segment to prevent double prefixing
+  let cleanSegments = [...pathSegments];
+  if (cleanSegments[0] === "api") {
+    cleanSegments.shift();
+  }
+  
+  const path = cleanSegments.map(encodeURIComponent).join("/");
   const suffix = base.endsWith("/api") || base.endsWith("/api/") ? "" : "/api";
   return `${base}${suffix}/${path}${search}`;
 }
