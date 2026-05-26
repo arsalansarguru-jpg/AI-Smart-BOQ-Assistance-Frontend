@@ -451,6 +451,18 @@ export default function MasterBoqWorkspace() {
   const [takeoffOmittedItems, setTakeoffOmittedItems] = useState<OmittedItem[] | null>(null);
   const [showTakeoffPanel, setShowTakeoffPanel] = useState(false);
   
+  // AI Progress Billing & JMR Cockpit States
+  const [billingModeActive, setBillingModeActive] = useState(false);
+  const [billingQuantities, setBillingQuantities] = useState<Record<string, string>>({});
+  const [billingPhotos, setBillingPhotos] = useState<Record<string, string>>({});
+  const [certifiedJmrItems, setCertifiedJmrItems] = useState<Record<string, boolean>>({});
+  const [jmrSignedBy, setJmrSignedBy] = useState<string | null>(null);
+  const [jmrSignedDate, setJmrSignedDate] = useState<string | null>(null);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [showRaBillModal, setShowRaBillModal] = useState(false);
+  const [generatedRaBill, setGeneratedRaBill] = useState<any | null>(null);
+  
   // Clear sourcing when item selection changes
   useEffect(() => {
     setSourcingResults(null);
@@ -501,6 +513,41 @@ export default function MasterBoqWorkspace() {
       itemsToReconcile
     };
   }, [items, vendorQuotations]);
+
+  const billingMetrics = useMemo(() => {
+    if (items.length === 0) return { prev: 0, current: 0, cum: 0, retention: 0, net: 0, backlog: 0, progress: 0 };
+
+    let totalContractSum = 0;
+    let prevValuation = 0;
+    let currentValuation = 0;
+
+    for (const item of items) {
+      const boqQty = item.quantity;
+      const rate = item.rate;
+      const prevQty = Math.floor(boqQty * 0.3); // standard seeded 30% previous logs
+      const currentQty = parseFloat(billingQuantities[item.id] || "0");
+
+      totalContractSum += boqQty * rate;
+      prevValuation += prevQty * rate;
+      currentValuation += currentQty * rate;
+    }
+
+    const cumValuation = prevValuation + currentValuation;
+    const retention = currentValuation * 0.05;
+    const netReceivable = currentValuation - retention;
+    const backlog = Math.max(0, totalContractSum - cumValuation);
+    const progress = totalContractSum > 0 ? (cumValuation / totalContractSum) * 100 : 0;
+
+    return {
+      prev: prevValuation,
+      current: currentValuation,
+      cum: cumValuation,
+      retention,
+      net: netReceivable,
+      backlog,
+      progress: Math.min(100, progress),
+    };
+  }, [items, billingQuantities]);
 
   const applyAiOptimizations = () => {
     if (!savingsAnalysis || savingsAnalysis.itemsToReconcile.length === 0) return;
@@ -1406,6 +1453,135 @@ Office of Procurement`;
     });
   };
 
+  // AI Progress Billing & JMR Cockpit Handlers
+  const handleQuantityBillingChange = (itemId: string, val: string) => {
+    setBillingQuantities((prev) => ({
+      ...prev,
+      [itemId]: val,
+    }));
+  };
+
+  const handleAttachSitePhoto = (itemId: string) => {
+    // List of high-res Construction / MEP on-site progress photos
+    const constructionPhotos = [
+      "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=600&q=80", // Worker welding pipes
+      "https://images.unsplash.com/photo-1581092921461-eab62e97a780?auto=format&fit=crop&w=600&q=80", // Electrical cables distribution board
+      "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=600&q=80", // HVAC pipes on hanger brackets
+      "https://images.unsplash.com/photo-1621905252507-b354bc25edac?auto=format&fit=crop&w=600&q=80", // Copper air conditioning refrigerant line
+    ];
+    
+    // Pick a random photo linked to this item
+    const randomPhoto = constructionPhotos[Math.floor(Math.random() * constructionPhotos.length)];
+    setBillingPhotos((prev) => ({
+      ...prev,
+      [itemId]: randomPhoto,
+    }));
+    
+    toast.success("Site Progress Photo Linked!", {
+      description: "Visual evidence uploaded and attached to Joint Measurement Record (JMR).",
+    });
+  };
+
+  const handleSimulateJmrSignoff = () => {
+    const activeBillingItems = items.filter((item) => {
+      const currentQty = parseFloat(billingQuantities[item.id] || "0");
+      return currentQty > 0;
+    });
+
+    if (activeBillingItems.length === 0) {
+      toast.warning("No quantities logged!", {
+        description: "Please enter current month executed quantities in the measurements sheet before obtaining sign-off.",
+      });
+      return;
+    }
+
+    const signee = "Govind Nair (Lead Consultant, Vertex MEP)";
+    const dateStr = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+    
+    setJmrSignedBy(signee);
+    setJmrSignedDate(dateStr);
+
+    const updatedCertification: Record<string, boolean> = {};
+    activeBillingItems.forEach((item) => {
+      updatedCertification[item.id] = true;
+    });
+    setCertifiedJmrItems(updatedCertification);
+
+    toast.success("JMR Certified by Consultant!", {
+      description: `Lead Consultant ${signee} signed off on executed quantities. Joint Measurement Record locked!`,
+    });
+  };
+
+  const handleGenerateRaBill = async () => {
+    const activeBillingItems = items.map((item) => {
+      // Calculate realistic simulated historical quantity to make pre-billed state extremely realistic!
+      const prevQty = Math.floor(item.quantity * 0.3); 
+      const currentQty = parseFloat(billingQuantities[item.id] || "0");
+      
+      return {
+        id: item.id,
+        item_no: item.item_no,
+        description: item.description,
+        category: item.category,
+        boq_qty: item.quantity,
+        unit: item.unit,
+        rate: item.rate,
+        prev_qty: prevQty,
+        current_qty: currentQty,
+        remarks: item.references?.notes || "",
+      };
+    }).filter((i) => i.current_qty > 0);
+
+    if (activeBillingItems.length === 0) {
+      toast.warning("No billing progress logged!", {
+        description: "Please enter executed quantities for this month to generate a progress bill.",
+      });
+      return;
+    }
+
+    const toastId = toast.loading("Generating certified progress invoice...");
+    setBillingLoading(true);
+
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const customKey = localStorage.getItem("custom_gemini_api_key");
+      if (customKey && customKey.trim()) {
+        headers["X-Gemini-API-Key"] = customKey.trim();
+      }
+
+      const res = await fetch("/api/backend/billing/generate-ra-bill", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          project_name: activeProject?.name || "Simulated MEP Commercial Project",
+          bill_number: "RA-01",
+          items: activeBillingItems,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to compile progress invoice.");
+      }
+
+      const data = await res.json();
+      setGeneratedRaBill(data);
+      setShowRaBillModal(true);
+      
+      toast.success("Certified RA Bill Compiled!", {
+        id: toastId,
+        description: `Running Account Invoice RA-01 valuation: ₹${data.net_payable_amount.toLocaleString("en-IN")}.`,
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("Billing compilation failed", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Please check your network status.",
+      });
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
   const seedProjectData = (projId: string): WorkspaceBoqItem[] => {
     let seeded: WorkspaceBoqItem[] = [];
 
@@ -2242,6 +2418,191 @@ Office of Procurement`;
         </div>
       )}
 
+      {/* JMR SITE PHOTO PREVIEW MODAL */}
+      {previewPhotoUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 p-6 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="flex w-full max-w-lg flex-col rounded-3xl border border-emerald-500/20 bg-zinc-900 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-6 py-4.5">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400">📸</span>
+                <span className="text-xs font-bold text-zinc-200">JMR Site Verification Image</span>
+              </div>
+              <button
+                onClick={() => setPreviewPhotoUrl(null)}
+                className="rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] font-bold px-2.5 py-1 text-zinc-400 cursor-pointer"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div className="p-4 bg-zinc-950 flex items-center justify-center border-b border-zinc-800">
+              <img src={previewPhotoUrl} className="max-h-[350px] w-full object-cover rounded-xl border border-zinc-800 shadow-md" alt="construction progress check" />
+            </div>
+            <div className="bg-zinc-900 p-4.5 text-[11px] text-zinc-400 space-y-2">
+              <div className="flex justify-between border-b border-zinc-800 pb-1.5">
+                <span className="font-semibold text-zinc-500">Record Verification:</span>
+                <span className="text-emerald-400 font-bold">JMR-Evidence-Live</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-semibold text-zinc-500">Site Status:</span>
+                <span className="text-zinc-200">Work Completed & Logged</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CERTIFIED RA BILL INVOICE MODAL */}
+      {showRaBillModal && generatedRaBill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 p-6 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="flex h-[88vh] w-full max-w-3xl flex-col rounded-3xl border border-emerald-500/35 bg-zinc-900 shadow-2xl overflow-hidden shadow-emerald-500/10">
+            <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-6 py-4.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded bg-emerald-500/10 text-emerald-400 font-bold text-xs border border-emerald-500/20">🖨</div>
+                <div>
+                  <span className="text-[9px] font-extrabold tracking-widest text-emerald-400 uppercase">Vertex RA Invoice Compiler</span>
+                  <h3 className="text-sm font-bold text-zinc-200">Running Account Billing Certificate — {generatedRaBill.bill_number}</h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowRaBillModal(false)}
+                className="rounded-xl border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-xs px-3.5 py-1.5 transition text-zinc-300 cursor-pointer"
+              >
+                ✕ Close Invoice
+              </button>
+            </div>
+
+            {/* Print Area */}
+            <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-white text-zinc-900 select-text">
+              {/* Branded Letterhead */}
+              <div className="flex justify-between items-start border-b-2 border-zinc-800 pb-5">
+                <div>
+                  <h2 className="text-lg font-black tracking-tight text-zinc-900">VERTEX MEP CONTRACTING PVT. LTD.</h2>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">Quantity Surveying & MEP Execution Division</p>
+                  <p className="text-[9px] text-zinc-400">GSTIN: 27AAAAA1111A1Z1 • Mumbai, India</p>
+                </div>
+                <div className="text-right">
+                  <span className="inline-block bg-emerald-600 text-white font-extrabold text-[9px] px-2.5 py-1 rounded tracking-wider uppercase">JMR Certified Invoice</span>
+                  <h4 className="text-xs font-black mt-2 text-zinc-800">Invoice Ref: {generatedRaBill.bill_number}</h4>
+                  <p className="text-[10px] text-zinc-500">Date: {jmrSignedDate || new Date().toLocaleDateString("en-IN")}</p>
+                </div>
+              </div>
+
+              {/* Bill Details */}
+              <div className="grid grid-cols-2 gap-4 text-xs text-zinc-600">
+                <div>
+                  <h5 className="font-extrabold text-[10px] text-zinc-400 uppercase tracking-wider">Client / Developer:</h5>
+                  <p className="font-bold text-zinc-800 mt-0.5">Vertex Developers & Infrastructures Ltd.</p>
+                  <p className="text-zinc-500">Project: {generatedRaBill.project_name}</p>
+                  <p className="text-zinc-500">Contract Reference: VDX-MEP-2026-902</p>
+                </div>
+                <div className="text-right">
+                  <h5 className="font-extrabold text-[10px] text-zinc-400 uppercase tracking-wider">Consultant Certification:</h5>
+                  <p className="font-bold text-emerald-600 mt-0.5">✓ Joint Measurement Certified</p>
+                  <p className="text-zinc-500">Signee: {jmrSignedBy || "Lead Consultant"}</p>
+                  <p className="text-zinc-500">Progress: <span className="font-bold text-zinc-800">{generatedRaBill.overall_progress_percent}% Complete</span></p>
+                </div>
+              </div>
+
+              {/* Valuation Sheet Table */}
+              <div className="border border-zinc-300 rounded-xl overflow-hidden mt-4">
+                <table className="w-full text-left text-[10px] border-collapse">
+                  <thead>
+                    <tr className="bg-zinc-100 text-zinc-700 font-extrabold border-b border-zinc-300 text-[8px] uppercase tracking-wider">
+                      <th className="px-2.5 py-2">Item</th>
+                      <th className="px-3 py-2">Description</th>
+                      <th className="px-2.5 py-2 text-right">BOQ Qty</th>
+                      <th className="px-1.5 py-2 text-center">Unit</th>
+                      <th className="px-2.5 py-2 text-right">Rate</th>
+                      <th className="px-2.5 py-2 text-right">Prev Qty</th>
+                      <th className="px-2.5 py-2 text-right">Current Qty</th>
+                      <th className="px-3 py-2 text-right">Current Claim</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200 text-zinc-800 font-medium">
+                    {items.map((item) => {
+                      const prevQty = Math.floor(item.quantity * 0.3);
+                      const currentVal = billingQuantities[item.id] || "0";
+                      const currentQty = parseFloat(currentVal);
+                      if (currentQty <= 0) return null;
+                      
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-2.5 py-2 font-bold font-mono">{item.item_no}</td>
+                          <td className="px-3 py-2 text-zinc-950 font-bold truncate max-w-xs" title={item.description}>{item.description}</td>
+                          <td className="px-2.5 py-2 text-right font-mono">{item.quantity}</td>
+                          <td className="px-1.5 py-2 text-center uppercase">{item.unit}</td>
+                          <td className="px-2.5 py-2 text-right font-mono">₹{item.rate.toLocaleString("en-IN")}</td>
+                          <td className="px-2.5 py-2 text-right font-mono">{prevQty}</td>
+                          <td className="px-2.5 py-2 text-right font-mono font-bold text-zinc-950">{currentQty}</td>
+                          <td className="px-3 py-2 text-right font-bold font-mono text-zinc-950">₹{(currentQty * item.rate).toLocaleString("en-IN")}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Financial calculations summaries */}
+              <div className="flex justify-end mt-4">
+                <div className="w-80 text-xs space-y-2 text-zinc-800">
+                  <div className="flex justify-between">
+                    <span className="font-semibold text-zinc-500">Gross Valuation (This Claim):</span>
+                    <span className="font-bold font-mono">₹{generatedRaBill.total_current_amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-red-600 font-semibold">
+                    <span>Less: 5% Retention withheld:</span>
+                    <span className="font-bold font-mono">-₹{generatedRaBill.retention_withheld.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <hr className="border-zinc-300" />
+                  <div className="flex justify-between font-bold">
+                    <span className="text-zinc-600">Net Receivable Value:</span>
+                    <span className="font-mono">₹{generatedRaBill.net_receivable_before_tax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-zinc-500">
+                    <span>Add: 18% GST (CGST 9% + SGST 9%):</span>
+                    <span className="font-semibold font-mono">₹{generatedRaBill.tax_amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <hr className="border-zinc-800 border-t-2" />
+                  <div className="flex justify-between font-black text-sm text-emerald-700 bg-emerald-50 rounded-lg p-2.5 border border-emerald-200">
+                    <span>NET VALUATION DUE:</span>
+                    <span className="font-mono">₹{generatedRaBill.net_payable_amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Signatures block */}
+              <div className="flex justify-between items-end pt-12 text-[10px] text-zinc-500">
+                <div className="text-center w-48 border-t border-dashed border-zinc-400 pt-1.5">
+                  <p className="font-bold text-zinc-800">Vertex MEP Lead QS</p>
+                  <p className="text-[8px]">Prepared by Contractor</p>
+                </div>
+                <div className="text-center flex flex-col items-center justify-center">
+                  <div className="border-2 border-emerald-500 text-emerald-600 font-black text-[10px] px-3.5 py-1.5 rounded-xl rotate-[-4deg] tracking-widest uppercase bg-emerald-50 animate-pulse select-none border-dashed mb-2 flex flex-col items-center">
+                    <span>✓ CERTIFIED JMR</span>
+                    <span className="text-[7px] font-bold tracking-tight mt-0.5">{jmrSignedDate}</span>
+                  </div>
+                  <p className="font-extrabold text-zinc-400 text-[8px] tracking-wider uppercase">Consultant Digital Seal</p>
+                </div>
+                <div className="text-center w-48 border-t border-dashed border-zinc-400 pt-1.5">
+                  <p className="font-bold text-zinc-800">Lead Project Consultant</p>
+                  <p className="text-[8px]">Certified for Payment</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-zinc-900 border-t border-zinc-800 px-6 py-4 flex justify-between items-center text-xs text-zinc-400">
+              <span>This invoice summary represents standard certified Running Account progress bills.</span>
+              <button 
+                onClick={() => window.print()}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-1.5 rounded-xl transition cursor-pointer shadow-md shadow-emerald-600/10"
+              >
+                🖨 Print / Save as PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* COMMIT REVISION MODAL */}
       {showCommitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 p-6 backdrop-blur-sm animate-in fade-in duration-150">
@@ -2375,50 +2736,126 @@ Office of Procurement`;
             </select>
           </div>
 
-          {/* AI AUTO-LINKER ACTION BUTTON */}
-          <div className="flex flex-col">
-            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">AI Document Automation</label>
-            <button
-              onClick={handleAutoLink}
-              disabled={autoLinkingLoading || items.length === 0}
-              className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
-                autoLinkingLoading
-                  ? "bg-violet-950 border border-zinc-800 text-zinc-400"
-                  : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-violet-600/10"
-              }`}
-            >
-              {autoLinkingLoading ? (
-                <>
-                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
-                  Linking Documents...
-                </>
-              ) : (
-                <>🔗 Auto-Link Project Documents via AI</>
-              )}
-            </button>
-          </div>
+          {billingModeActive ? (
+            <>
+              {/* JMR SITE ENGINEER SIGN-OFF ACTION BUTTON */}
+              <div className="flex flex-col">
+                <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">JMR Work Sign-off</label>
+                <button
+                  onClick={handleSimulateJmrSignoff}
+                  disabled={jmrSignedBy !== null}
+                  className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
+                    jmrSignedBy
+                      ? "bg-zinc-950 border border-emerald-500/20 text-emerald-400 shadow-emerald-500/5 cursor-not-allowed"
+                      : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/10 animate-pulse"
+                  }`}
+                >
+                  {jmrSignedBy ? (
+                    <>✓ JMR Certified</>
+                  ) : (
+                    <>⚡ Consultant Sign-off JMR</>
+                  )}
+                </button>
+              </div>
 
-          {/* AI Blueprint Takeoff Audit Trigger */}
+              {/* AUTOMATED RA BILL COMPILER TRIGGER */}
+              <div className="flex flex-col">
+                <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">RA Progress Invoice</label>
+                <button
+                  onClick={handleGenerateRaBill}
+                  disabled={billingLoading}
+                  className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
+                    billingLoading
+                      ? "bg-emerald-950 border border-zinc-800 text-zinc-400"
+                      : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/10"
+                  }`}
+                >
+                  {billingLoading ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
+                      Compiling RA Invoice...
+                    </>
+                  ) : (
+                    <>🖨 Compile Certified RA Bill</>
+                  )}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* AI AUTO-LINKER ACTION BUTTON */}
+              <div className="flex flex-col">
+                <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">AI Document Automation</label>
+                <button
+                  onClick={handleAutoLink}
+                  disabled={autoLinkingLoading || items.length === 0}
+                  className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
+                    autoLinkingLoading
+                      ? "bg-violet-950 border border-zinc-800 text-zinc-400"
+                      : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-violet-600/10"
+                  }`}
+                >
+                  {autoLinkingLoading ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
+                      Linking Documents...
+                    </>
+                  ) : (
+                    <>🔗 Auto-Link Project Documents via AI</>
+                  )}
+                </button>
+              </div>
+
+              {/* AI Blueprint Takeoff Audit Trigger */}
+              <div className="flex flex-col">
+                <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Drawing Takeoff Audit</label>
+                <button
+                  onClick={handleRunTakeoffAudit}
+                  disabled={takeoffLoading || items.length === 0}
+                  className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
+                    takeoffLoading
+                      ? "bg-emerald-950 border border-zinc-800 text-zinc-400"
+                      : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/10"
+                  }`}
+                >
+                  {takeoffLoading ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
+                      Auditing Blueprints...
+                    </>
+                  ) : (
+                    <>🔍 Audit Drawings for Omitted Items</>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* COCKPIT WORKSPACE MODE SWITCHER */}
           <div className="flex flex-col">
-            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Drawing Takeoff Audit</label>
-            <button
-              onClick={handleRunTakeoffAudit}
-              disabled={takeoffLoading || items.length === 0}
-              className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
-                takeoffLoading
-                  ? "bg-emerald-950 border border-zinc-800 text-zinc-400"
-                  : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/10"
-              }`}
-            >
-              {takeoffLoading ? (
-                <>
-                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
-                  Auditing Blueprints...
-                </>
-              ) : (
-                <>🔍 Audit Drawings for Omitted Items</>
-              )}
-            </button>
+            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Active Workspace Mode</label>
+            <div className="flex bg-zinc-950 border border-zinc-800 rounded-xl p-0.5 h-[32px] items-center">
+              <button
+                onClick={() => setBillingModeActive(false)}
+                className={`rounded-lg px-3 py-1 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer h-[26px] ${
+                  !billingModeActive
+                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/10"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                📝 Estimate (Pre-Bid)
+              </button>
+              <button
+                onClick={() => setBillingModeActive(true)}
+                className={`rounded-lg px-3 py-1 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer h-[26px] ${
+                  billingModeActive
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/10"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                🏗 Progress Billing (JMR)
+              </button>
+            </div>
           </div>
           
           {/* ROLE SELECTOR SWITCHER */}
@@ -2546,50 +2983,94 @@ Office of Procurement`;
       )}
 
       {/* CORE WORKSPACE METRICS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-violet-500/10 to-transparent rounded-bl-full" />
-          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Grand Est. Sum</span>
-          <h3 className="text-xl font-extrabold text-zinc-50 tracking-tight mt-1">{formatPrice(grandTotal)}</h3>
-          <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
-            Optimistic updates active
-          </p>
-        </div>
+      {billingModeActive ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 animate-in fade-in duration-200">
+          <div className="bg-zinc-950 border border-emerald-500/25 rounded-2xl p-4 shadow-sm relative overflow-hidden shadow-emerald-950/5">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Current RA Bill Valuation</span>
+            <h3 className="text-xl font-extrabold text-emerald-400 tracking-tight mt-1">{formatPrice(billingMetrics.current)}</h3>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              Net Claim (95%): {formatPrice(billingMetrics.net)}
+            </p>
+          </div>
 
-        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-bl-full" />
-          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Audit Approval Rate</span>
-          <h3 className="text-xl font-extrabold text-emerald-400 tracking-tight mt-1">{approvalRate}%</h3>
-          <div className="w-full h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
-            <div className="h-full bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${approvalRate}%` }} />
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-indigo-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Cumulative Certified Work</span>
+            <h3 className="text-xl font-extrabold text-indigo-400 tracking-tight mt-1">{formatPrice(billingMetrics.cum)}</h3>
+            <div className="w-full h-1.5 bg-zinc-800 rounded-full mt-2 overflow-hidden relative">
+              <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${billingMetrics.progress}%` }} />
+            </div>
+            <span className="text-[9px] text-zinc-500 font-extrabold mt-1 block text-right">{billingMetrics.progress.toFixed(1)}% Project Progress</span>
+          </div>
+
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-amber-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">5% Retention Reserve</span>
+            <h3 className="text-xl font-extrabold text-amber-400 tracking-tight mt-1">{formatPrice(billingMetrics.retention)}</h3>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              Withheld security deposit
+            </p>
+          </div>
+
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-zinc-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Unbilled Backlog Sum</span>
+            <h3 className="text-xl font-extrabold text-zinc-300 tracking-tight mt-1">{formatPrice(billingMetrics.backlog)}</h3>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
+              Of {formatPrice(billingMetrics.prev + billingMetrics.current + billingMetrics.backlog)} total value
+            </p>
           </div>
         </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-violet-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Grand Est. Sum</span>
+            <h3 className="text-xl font-extrabold text-zinc-50 tracking-tight mt-1">{formatPrice(grandTotal)}</h3>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+              Optimistic updates active
+            </p>
+          </div>
 
-        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-red-500/10 to-transparent rounded-bl-full" />
-          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Validation Alerts</span>
-          <h3 className={`text-xl font-extrabold tracking-tight mt-1 ${validationWarningsCount > 0 ? "text-red-400 animate-pulse" : "text-zinc-50"}`}>
-            {validationWarningsCount}
-          </h3>
-          <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
-            <span className={`h-1.5 w-1.5 rounded-full ${validationWarningsCount > 0 ? "bg-red-400" : "bg-zinc-600"}`} />
-            Qty/Rate Zero entries
-          </p>
-        </div>
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Audit Approval Rate</span>
+            <h3 className="text-xl font-extrabold text-emerald-400 tracking-tight mt-1">{approvalRate}%</h3>
+            <div className="w-full h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${approvalRate}%` }} />
+            </div>
+          </div>
 
-        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-yellow-500/10 to-transparent rounded-bl-full" />
-          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Duplicate Row Flags</span>
-          <h3 className={`text-xl font-extrabold tracking-tight mt-1 ${duplicateAlertsCount > 0 ? "text-yellow-400" : "text-zinc-50"}`}>
-            {duplicateAlertsCount}
-          </h3>
-          <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
-            <span className={`h-1.5 w-1.5 rounded-full ${duplicateAlertsCount > 0 ? "bg-yellow-400" : "bg-zinc-600"}`} />
-            Similar Trade/Desc rows
-          </p>
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-red-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Validation Alerts</span>
+            <h3 className={`text-xl font-extrabold tracking-tight mt-1 ${validationWarningsCount > 0 ? "text-red-400 animate-pulse" : "text-zinc-50"}`}>
+              {validationWarningsCount}
+            </h3>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <span className={`h-1.5 w-1.5 rounded-full ${validationWarningsCount > 0 ? "bg-red-400" : "bg-zinc-600"}`} />
+              Qty/Rate Zero entries
+            </p>
+          </div>
+
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-br from-yellow-500/10 to-transparent rounded-bl-full" />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Duplicate Row Flags</span>
+            <h3 className={`text-xl font-extrabold tracking-tight mt-1 ${duplicateAlertsCount > 0 ? "text-yellow-400" : "text-zinc-50"}`}>
+              {duplicateAlertsCount}
+            </h3>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <span className={`h-1.5 w-1.5 rounded-full ${duplicateAlertsCount > 0 ? "bg-yellow-400" : "bg-zinc-600"}`} />
+              Similar Trade/Desc rows
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* SaaS TRIAL / SUBSCRIPTION UPGRADE REMINDER BANNER */}
       {subscribed === false && (
@@ -2840,19 +3321,36 @@ Office of Procurement`;
               ) : (
                 <table className="w-full text-left text-xs divide-y divide-zinc-800 border-collapse table-fixed select-none">
                   <thead className="bg-zinc-950 text-zinc-400 sticky top-0 z-20 shadow-md">
-                    <tr className="divide-x divide-zinc-900 border-b border-zinc-800 font-bold uppercase text-[9px] tracking-wider">
-                      <th className="w-12 px-2.5 py-3 text-center">#</th>
-                      <th className="w-24 px-2 py-3">Category</th>
-                      <th className="w-64 px-3 py-3">Description</th>
-                      <th className="w-16 px-2 py-3">Unit</th>
-                      <th className="w-20 px-2 py-3 text-right">Qty</th>
-                      <th className="w-20 px-2 py-3 text-right">Rate</th>
-                      <th className="w-28 px-3 py-3">Vendor</th>
-                      <th className="w-24 px-3 py-3 text-right">Amount</th>
-                      <th className="w-28 px-3 py-3 text-center">Linked Drawing</th>
-                      <th className="w-28 px-3 py-3 text-center">Review Status</th>
-                      <th className="w-14 px-2 py-3 text-center">Actions</th>
-                    </tr>
+                    {billingModeActive ? (
+                      <tr className="divide-x divide-zinc-900 border-b border-emerald-900/40 font-bold uppercase text-[9px] tracking-wider">
+                        <th className="w-10 px-2 py-3 text-center">#</th>
+                        <th className="w-18 px-2 py-3">Category</th>
+                        <th className="w-48 px-3 py-3">Description</th>
+                        <th className="w-18 px-2 py-3 text-right">BOQ Qty</th>
+                        <th className="w-12 px-2 py-3 text-center">Unit</th>
+                        <th className="w-18 px-2 py-3 text-right">Rate</th>
+                        <th className="w-18 px-2 py-3 text-right">Prev Qty</th>
+                        <th className="w-24 px-2 py-3 text-right">Current Qty</th>
+                        <th className="w-18 px-2 py-3 text-right">Cum Qty</th>
+                        <th className="w-16 px-2 py-3 text-right">Cum %</th>
+                        <th className="w-24 px-3 py-3 text-right">Current Valuation</th>
+                        <th className="w-36 px-2 py-3 text-center">Evidence & Status</th>
+                      </tr>
+                    ) : (
+                      <tr className="divide-x divide-zinc-900 border-b border-zinc-800 font-bold uppercase text-[9px] tracking-wider">
+                        <th className="w-12 px-2.5 py-3 text-center">#</th>
+                        <th className="w-24 px-2 py-3">Category</th>
+                        <th className="w-64 px-3 py-3">Description</th>
+                        <th className="w-16 px-2 py-3">Unit</th>
+                        <th className="w-20 px-2 py-3 text-right">Qty</th>
+                        <th className="w-20 px-2 py-3 text-right">Rate</th>
+                        <th className="w-28 px-3 py-3">Vendor</th>
+                        <th className="w-24 px-3 py-3 text-right">Amount</th>
+                        <th className="w-28 px-3 py-3 text-center">Linked Drawing</th>
+                        <th className="w-28 px-3 py-3 text-center">Review Status</th>
+                        <th className="w-14 px-2 py-3 text-center">Actions</th>
+                      </tr>
+                    )}
                   </thead>
 
                   <tbody className="divide-y divide-zinc-900 bg-zinc-950">
@@ -2865,7 +3363,7 @@ Office of Procurement`;
                         <Fragment key={`group-${category}`}>
                           {/* COLLAPSIBLE GROUP HEADER */}
                           <tr className="bg-zinc-900/80 sticky z-10 font-bold text-zinc-300 hover:bg-zinc-900 transition">
-                            <td colSpan={11} className="px-3 py-2 border-b border-zinc-800 border-t border-zinc-800">
+                            <td colSpan={billingModeActive ? 12 : 11} className="px-3 py-2 border-b border-zinc-800 border-t border-zinc-800">
                               <div className="flex items-center justify-between">
                                 <button
                                   onClick={() => setCollapsedCategories(prev => ({ ...prev, [category]: !prev[category] }))}
@@ -2879,8 +3377,14 @@ Office of Procurement`;
                                 </button>
                                 
                                 <div className="flex items-center gap-4 text-xs font-semibold text-zinc-400">
-                                  <span>Subtotal:</span>
-                                  <span className="text-violet-400 font-extrabold text-sm">{formatPrice(subtotal)}</span>
+                                  <span>{billingModeActive ? "Valuation Subtotal:" : "Subtotal:"}</span>
+                                  <span className={`font-extrabold text-sm ${billingModeActive ? "text-emerald-400" : "text-violet-400"}`}>
+                                    {formatPrice(
+                                      billingModeActive
+                                        ? catItems.reduce((acc, it) => acc + (parseFloat(billingQuantities[it.id] || "0") * it.rate), 0)
+                                        : subtotal
+                                    )}
+                                  </span>
                                 </div>
                               </div>
                             </td>
@@ -2911,170 +3415,216 @@ Office of Procurement`;
                                       : "hover:bg-zinc-900/30 text-zinc-300"
                                 } ${hasWarning ? "bg-red-500/5" : ""} ${isDup ? "bg-yellow-500/5" : ""}`}
                               >
-                                {/* ITEM NUMBER */}
-                                <td className="px-2.5 py-2.5 text-center text-zinc-500 font-medium">
-                                  {item.item_no}
-                                </td>
-
-                                {/* CATEGORY */}
-                                <td className="px-1 py-1">
-                                  <select
-                                    value={item.category}
-                                    disabled={!canEditRow}
-                                    onChange={(e) => updateItemField(item.id, "category", e.target.value)}
-                                    className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
-                                  >
-                                    {SUPPORTED_CATEGORIES.map(c => (
-                                      <option key={c} value={c}>{c}</option>
-                                    ))}
-                                  </select>
-                                </td>
-
-                                {/* DESCRIPTION */}
-                                <td className="px-2 py-1">
-                                  <div className="flex items-center gap-1.5 w-full">
-                                    {isDup && (
-                                      <span className="text-yellow-500" title="Duplicate row detected! Same category and description exists.">⚠</span>
-                                    )}
-                                    {hasWarning && (
-                                      <span className="text-red-500 animate-pulse font-bold" title="Zero value entries found!">●</span>
-                                    )}
-                                    {item.status === "Revision Requested" && (
-                                      <span className="text-red-400 font-bold" title={item.changeRequestComment || "Change requested"}>⟲</span>
-                                    )}
-                                    <input
-                                      type="text"
-                                      value={item.description}
-                                      disabled={!canEditRow}
-                                      onChange={(e) => updateItemField(item.id, "description", e.target.value)}
-                                      className="w-full bg-transparent border-0 rounded px-1 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition truncate"
-                                      title={item.description}
-                                    />
-                                  </div>
-                                </td>
-
-                                {/* UNIT */}
-                                <td className="px-1 py-1">
-                                  <input
-                                    type="text"
-                                    value={item.unit}
-                                    disabled={!canEditRow}
-                                    onChange={(e) => updateItemField(item.id, "unit", e.target.value)}
-                                    className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs text-center outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
-                                  />
-                                </td>
-
-                                {/* QTY */}
-                                <td className="px-1 py-1">
-                                  <input
-                                    type="number"
-                                    value={item.quantity}
-                                    disabled={!canEditRow}
-                                    onChange={(e) => updateItemField(item.id, "quantity", Number(e.target.value))}
-                                    className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs text-right outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  />
-                                </td>
-
-                                {/* RATE */}
-                                <td className="px-1 py-1">
-                                  <input
-                                    type="number"
-                                    value={item.rate}
-                                    disabled={!canEditRow}
-                                    onChange={(e) => updateItemField(item.id, "rate", Number(e.target.value))}
-                                    className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs text-right font-semibold text-zinc-100 outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  />
-                                </td>
-
-                                {/* SELECTED VENDOR */}
-                                <td className="px-1 py-1">
-                                  <select
-                                    value={item.selectedVendor}
-                                    disabled={!canEditRow}
-                                    onChange={(e) => {
-                                      updateItemField(item.id, "selectedVendor", e.target.value);
-                                      const match = matchedSupplierQuotes.find(q => q.vendor === e.target.value);
-                                      if (match) {
-                                        updateItemField(item.id, "rate", match.rate);
-                                      }
-                                    }}
-                                    className="w-full bg-transparent border-0 rounded px-1 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
-                                  >
-                                    <option value="None">None (Manual)</option>
-                                    <option value="ABC Metals & Tubes">ABC Metals & Tubes</option>
-                                    <option value="Supreme Piping Corp">Supreme Piping Corp</option>
-                                    <option value="Global Trades">Global Trades</option>
-                                    <option value="Tata Steel Piping">Tata Steel Piping</option>
-                                    <option value="Tyco Fire Protection">Tyco Fire Protection</option>
-                                    <option value="UltraTech Concrete">UltraTech Concrete</option>
-                                    <option value="Hikvision Direct">Hikvision Direct</option>
-                                    <option value="Anchor">Anchor</option>
-                                    <option value="Havells">Havells</option>
-                                    <option value="Polycab">Polycab</option>
-                                  </select>
-                                </td>
-
-                                {/* AMOUNT */}
-                                <td className="px-3 py-2.5 text-right font-extrabold text-zinc-100">
-                                  {formatPrice(item.amount)}
-                                </td>
-
-                                {/* LINKED DRAWING REF */}
-                                <td className="px-3 py-2 text-center">
-                                  {item.references.drawings.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1 justify-center">
-                                      {item.references.drawings.map((dwg) => (
-                                        <button
-                                          key={dwg.id}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setActiveDrawingSheet({ sheetNumber: dwg.sheetNumber, title: dwg.title });
-                                          }}
-                                          className="rounded bg-sky-500/10 text-sky-400 hover:bg-sky-500 hover:text-zinc-950 px-2 py-0.5 text-[10px] font-bold border border-sky-500/20 transition cursor-pointer"
-                                        >
-                                          {dwg.sheetNumber}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-[10px] text-zinc-600 italic">No drawing linked</span>
-                                  )}
-                                </td>
-
-                                {/* REVIEW STATUS BADGE */}
-                                <td className="px-3 py-2 text-center">
-                                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider border select-none ${
-                                    item.status === "Approved"
-                                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                      : item.status === "Pending Senior Review"
-                                        ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                        : item.status === "Pending Procurement"
-                                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                          : item.status === "Revision Requested"
-                                            ? "bg-red-500/10 text-red-400 border-red-500/20 animate-pulse"
-                                            : "bg-zinc-800 text-zinc-400 border-zinc-700"
-                                  }`}>
-                                    {item.status}
-                                  </span>
-                                </td>
-
-                                {/* DELETE ROW */}
-                                <td className="px-2 py-2 text-center">
-                                  {!boqLocked && currentUserRole === "junior" && (item.status === "Draft" || item.status === "Revision Requested") ? (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteRow(item.id);
-                                      }}
-                                      className="text-zinc-600 hover:text-red-400 font-bold p-1 transition cursor-pointer"
-                                      title="Delete BOQ row"
-                                    >
-                                      ✕
-                                    </button>
-                                  ) : (
-                                    <span className="text-zinc-700">-</span>
-                                  )}
-                                </td>
+                                {billingModeActive ? (
+                                  <>
+                                    <td className="px-2 py-2.5 text-center text-zinc-500 font-mono text-[10px]">
+                                      {item.item_no}
+                                    </td>
+                                    <td className="px-2.5 py-2.5 font-extrabold text-zinc-400 text-[10px]">
+                                      {item.category}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-zinc-200 font-medium truncate" title={item.description}>
+                                      {item.description}
+                                    </td>
+                                    <td className="px-2 py-2.5 text-right text-zinc-400 font-mono text-[11px]">
+                                      {item.quantity}
+                                    </td>
+                                    <td className="px-1 py-2.5 text-center text-zinc-400 uppercase font-semibold text-[10px]">
+                                      {item.unit}
+                                    </td>
+                                    <td className="px-2 py-2.5 text-right text-zinc-400 font-mono text-[11px]">
+                                      {formatPrice(item.rate)}
+                                    </td>
+                                    <td className="px-2 py-2.5 text-right text-zinc-500 font-mono bg-zinc-950/10 text-[11px]">
+                                      {Math.floor(item.quantity * 0.3)}
+                                    </td>
+                                    <td className="px-1 py-1 bg-zinc-950/25">
+                                      {(() => {
+                                        const prevQty = Math.floor(item.quantity * 0.3);
+                                        const currentVal = billingQuantities[item.id] || "";
+                                        const currentQty = parseFloat(currentVal || "0");
+                                        const isOverbilled = prevQty + currentQty > item.quantity;
+                                        return (
+                                          <div className="relative flex items-center">
+                                            <input
+                                              type="text"
+                                              value={currentVal}
+                                              onChange={(e) => handleQuantityBillingChange(item.id, e.target.value)}
+                                              placeholder="0.00"
+                                              disabled={certifiedJmrItems[item.id]}
+                                              className={`w-full bg-zinc-950/50 border border-zinc-800 focus:border-emerald-600 rounded-lg px-2 py-1 text-xs text-right outline-none font-mono disabled:opacity-50 disabled:cursor-not-allowed ${isOverbilled ? "border-red-500/80 text-red-400 focus:border-red-500" : ""}`}
+                                            />
+                                            {isOverbilled && (
+                                              <span className="absolute left-1.5 text-red-500 font-bold animate-pulse text-[10px] cursor-help" title={`⚠️ Warning: Cumulative quantity (${prevQty + currentQty} ${item.unit}) exceeds BOQ contract limit of ${item.quantity} ${item.unit}! Overbilling risk.`}>⚠️</span>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
+                                    </td>
+                                    <td className="px-2 py-2.5 text-right text-zinc-300 font-mono bg-zinc-950/20 font-bold text-[11px]">
+                                      {(() => {
+                                        const prevQty = Math.floor(item.quantity * 0.3);
+                                        const currentQty = parseFloat(billingQuantities[item.id] || "0");
+                                        return (prevQty + currentQty).toFixed(2);
+                                      })()}
+                                    </td>
+                                    <td className="px-2 py-2.5 text-right font-mono text-[10px]">
+                                      {(() => {
+                                        const prevQty = Math.floor(item.quantity * 0.3);
+                                        const currentQty = parseFloat(billingQuantities[item.id] || "0");
+                                        const progress = item.quantity > 0 ? ((prevQty + currentQty) / item.quantity) * 100 : 0;
+                                        const isOver = progress > 100;
+                                        return (
+                                          <span className={isOver ? "text-red-400 font-bold" : progress >= 100 ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                                            {progress.toFixed(1)}%
+                                          </span>
+                                        );
+                                      })()}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-extrabold text-emerald-400 font-mono text-[11px]">
+                                      {(() => {
+                                        const currentQty = parseFloat(billingQuantities[item.id] || "0");
+                                        return formatPrice(currentQty * item.rate);
+                                      })()}
+                                    </td>
+                                    <td className="px-2 py-1 text-center">
+                                      <div className="flex items-center justify-center gap-1.5">
+                                        {billingPhotos[item.id] ? (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); setPreviewPhotoUrl(billingPhotos[item.id]); }}
+                                            className="h-7 w-7 rounded border border-emerald-500/40 overflow-hidden cursor-pointer shadow-sm shadow-emerald-500/10 hover:scale-105 transition duration-150"
+                                            title="Click to preview site photo verification evidence"
+                                          >
+                                            <img src={billingPhotos[item.id]} className="h-full w-full object-cover" alt="site progress check" />
+                                          </button>
+                                        ) : (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleAttachSitePhoto(item.id); }}
+                                            className="rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-[10px] font-bold px-2 py-1 text-zinc-400 transition cursor-pointer"
+                                          >
+                                            📸 Photo
+                                          </button>
+                                        )}
+                                        {certifiedJmrItems[item.id] ? (
+                                          <span className="rounded bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[9px] font-extrabold text-emerald-400 uppercase tracking-wider select-none animate-pulse">✓ Certified</span>
+                                        ) : parseFloat(billingQuantities[item.id] || "0") > 0 ? (
+                                          <span className="rounded bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[9px] font-extrabold text-amber-400 uppercase tracking-wider select-none">Draft JMR</span>
+                                        ) : (
+                                          <span className="text-[9px] text-zinc-600 italic">-</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    <td className="px-2.5 py-2.5 text-center text-zinc-500 font-medium">{item.item_no}</td>
+                                    <td className="px-1 py-1">
+                                      <select
+                                        value={item.category}
+                                        disabled={!canEditRow}
+                                        onChange={(e) => updateItemField(item.id, "category", e.target.value)}
+                                        className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
+                                      >
+                                        {SUPPORTED_CATEGORIES.map(c => (<option key={c} value={c}>{c}</option>))}
+                                      </select>
+                                    </td>
+                                    <td className="px-2 py-1">
+                                      <div className="flex items-center gap-1.5 w-full">
+                                        {isDup && <span className="text-yellow-500" title="Duplicate row detected! Same category and description exists.">⚠</span>}
+                                        {hasWarning && <span className="text-red-500 animate-pulse font-bold" title="Zero value entries found!">●</span>}
+                                        {item.status === "Revision Requested" && <span className="text-red-400 font-bold" title={item.changeRequestComment || "Change requested"}>⟲</span>}
+                                        <input
+                                          type="text"
+                                          value={item.description}
+                                          disabled={!canEditRow}
+                                          onChange={(e) => updateItemField(item.id, "description", e.target.value)}
+                                          className="w-full bg-transparent border-0 rounded px-1 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition truncate"
+                                          title={item.description}
+                                        />
+                                      </div>
+                                    </td>
+                                    <td className="px-1 py-1">
+                                      <input
+                                        type="text"
+                                        value={item.unit}
+                                        disabled={!canEditRow}
+                                        onChange={(e) => updateItemField(item.id, "unit", e.target.value)}
+                                        className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs text-center outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
+                                      />
+                                    </td>
+                                    <td className="px-1 py-1">
+                                      <input
+                                        type="number"
+                                        value={item.quantity}
+                                        disabled={!canEditRow}
+                                        onChange={(e) => updateItemField(item.id, "quantity", Number(e.target.value))}
+                                        className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs text-right outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      />
+                                    </td>
+                                    <td className="px-1 py-1">
+                                      <input
+                                        type="number"
+                                        value={item.rate}
+                                        disabled={!canEditRow}
+                                        onChange={(e) => updateItemField(item.id, "rate", Number(e.target.value))}
+                                        className="w-full bg-transparent border-0 rounded px-1.5 py-1 text-xs text-right outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      />
+                                    </td>
+                                    <td className="px-1 py-1">
+                                      <select
+                                        value={item.selectedVendor || "None"}
+                                        disabled={!canEditRow}
+                                        onChange={(e) => {
+                                          updateItemField(item.id, "selectedVendor", e.target.value);
+                                          const match = matchedSupplierQuotes.find(q => q.vendor === e.target.value);
+                                          if (match) updateItemField(item.id, "rate", match.rate);
+                                        }}
+                                        className="w-full bg-transparent border-0 rounded px-1 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
+                                      >
+                                        <option value="None">None (Manual)</option>
+                                        <option value="ABC Metals & Tubes">ABC Metals & Tubes</option>
+                                        <option value="Supreme Piping Corp">Supreme Piping Corp</option>
+                                        <option value="Global Trades">Global Trades</option>
+                                        <option value="Tata Steel Piping">Tata Steel Piping</option>
+                                        <option value="Tyco Fire Protection">Tyco Fire Protection</option>
+                                        <option value="UltraTech Concrete">UltraTech Concrete</option>
+                                        <option value="Hikvision Direct">Hikvision Direct</option>
+                                        <option value="Anchor">Anchor</option>
+                                        <option value="Havells">Havells</option>
+                                        <option value="Polycab">Polycab</option>
+                                      </select>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-extrabold text-zinc-100">{formatPrice(item.amount)}</td>
+                                    <td className="px-3 py-2 text-center">
+                                      {item.references.drawings.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 justify-center">
+                                          {item.references.drawings.map((dwg) => (
+                                            <button
+                                              key={dwg.id}
+                                              onClick={(e) => { e.stopPropagation(); setActiveDrawingSheet({ sheetNumber: dwg.sheetNumber, title: dwg.title }); }}
+                                              className="rounded bg-sky-500/10 text-sky-400 hover:bg-sky-500 hover:text-zinc-950 px-2 py-0.5 text-[10px] font-bold border border-sky-500/20 transition cursor-pointer"
+                                            >
+                                              {dwg.sheetNumber}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      ) : <span className="text-[10px] text-zinc-600 italic">No drawing linked</span>}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider border select-none ${item.status === "Approved" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : item.status === "Pending Senior Review" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : item.status === "Pending Procurement" ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : item.status === "Revision Requested" ? "bg-red-500/10 text-red-400 border-red-500/20 animate-pulse" : "bg-zinc-800 text-zinc-400 border-zinc-700"}`}>
+                                        {item.status}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-1 text-center">
+                                      <div className="flex items-center justify-center gap-1">
+                                        <button onClick={(e) => { e.stopPropagation(); setSelectedItemId(item.id); setSidebarTab("buildup"); }} className="h-6 w-6 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center text-[11px] font-bold transition cursor-pointer" title="Configure Cost Buildup Rate Matrix">⚙</button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleItemStatusChange(item.id, "Approved"); }} className="h-6 w-6 rounded bg-emerald-950/20 border border-emerald-900/40 text-emerald-400 hover:bg-emerald-600 hover:text-zinc-950 flex items-center justify-center text-[10px] font-bold transition cursor-pointer" disabled={item.status === "Approved" || boqLocked} title="Approve item rate">✓</button>
+                                        <button onClick={(e) => { e.stopPropagation(); setSelectedItemId(item.id); handleTriggerRevisionRequest(); }} className="h-6 w-6 rounded bg-red-950/20 border border-red-900/40 text-red-400 hover:bg-red-600 hover:text-zinc-950 flex items-center justify-center text-[9px] font-bold transition cursor-pointer" disabled={item.status === "Revision Requested" || boqLocked} title="Request rate revision">⟲</button>
+                                        <button onClick={(e) => { e.stopPropagation(); setItems(prev => prev.filter(it => it.id !== item.id)); }} className="h-6 w-6 rounded bg-zinc-950 text-zinc-600 hover:text-red-500 flex items-center justify-center text-[10px] transition cursor-pointer" disabled={boqLocked} title="Remove item">✕</button>
+                                      </div>
+                                    </td>
+                                  </>
+                                )}
                               </tr>
                             );
                           })}
