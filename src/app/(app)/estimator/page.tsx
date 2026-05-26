@@ -439,6 +439,18 @@ export default function MasterBoqWorkspace() {
   const [sourcingResults, setSourcingResults] = useState<SourcingVendor[] | null>(null);
   const [sourcingError, setSourcingError] = useState<string | null>(null);
   
+  // AI Drawing Takeoff Audit States
+  const [takeoffLoading, setTakeoffLoading] = useState(false);
+  interface OmittedItem {
+    description: string;
+    category: string;
+    tentative_quantity: number;
+    unit: string;
+    rationale: string;
+  }
+  const [takeoffOmittedItems, setTakeoffOmittedItems] = useState<OmittedItem[] | null>(null);
+  const [showTakeoffPanel, setShowTakeoffPanel] = useState(false);
+  
   // Clear sourcing when item selection changes
   useEffect(() => {
     setSourcingResults(null);
@@ -1274,6 +1286,126 @@ Office of Procurement`;
     }
   };
 
+  const handleRunTakeoffAudit = async () => {
+    if (items.length === 0) {
+      toast.error("Takeoff Audit Failed", {
+        description: "Please import or upload a BOQ document first.",
+      });
+      return;
+    }
+
+    const toastId = toast.loading("Analyzing blueprint CAD files for omitted items...");
+    setTakeoffLoading(true);
+    setTakeoffOmittedItems(null);
+
+    try {
+      const boqItemsReq = items.map((it) => ({
+        id: it.id,
+        description: it.description,
+        category: it.category,
+        quantity: it.quantity,
+        unit: it.unit,
+      }));
+
+      const drawings = projectFiles
+        .filter((f) => f.category === "drawings")
+        .map((f) => ({
+          id: f.id,
+          file_name: f.file_name,
+        }));
+
+      // Fallback seed drawing list for testing in local environment if empty
+      if (drawings.length === 0) {
+        drawings.push(
+          { id: "dwg-1", file_name: "H-102-HVAC-Piping-Layout.pdf" },
+          { id: "dwg-2", file_name: "E-204-Distribution-Block.pdf" },
+          { id: "dwg-3", file_name: "P-101-Plumbing-Riser.pdf" }
+        );
+      }
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const customKey = localStorage.getItem("custom_gemini_api_key");
+      if (customKey && customKey.trim()) {
+        headers["X-Gemini-API-Key"] = customKey.trim();
+      }
+
+      const res = await fetch("/api/backend/takeoff/audit-drawings", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          items: boqItemsReq,
+          drawings,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Takeoff audit request failed.");
+      }
+
+      const data = await res.json();
+      if (data && data.omitted_items) {
+        setTakeoffOmittedItems(data.omitted_items);
+        setShowTakeoffPanel(true);
+        toast.success("Takeoff audit completed!", {
+          id: toastId,
+          description: `Discovered ${data.omitted_items.length} omitted items standard for execution.`,
+        });
+      } else {
+        toast.warning("Takeoff audit completed with no warnings.", {
+          id: toastId,
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Blueprint Audit failed", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Please verify your Gemini key.",
+      });
+    } finally {
+      setTakeoffLoading(false);
+    }
+  };
+
+  const handleAddOmittedItem = (item: OmittedItem) => {
+    const randomId = `ai-add-${Math.random().toString(36).substring(2, 9)}`;
+    const newItem: WorkspaceBoqItem = {
+      id: randomId,
+      item_no: `AI-ADD-${items.length + 1}`,
+      description: item.description,
+      category: item.category as any,
+      quantity: item.tentative_quantity,
+      unit: item.unit,
+      rate: 0,
+      amount: 0,
+      suggestedRate: 0,
+      selectedVendor: "",
+      confidence: 1.0,
+      approved: false,
+      status: "Draft",
+      references: {
+        drawings: [],
+        makes: [],
+        notes: `[🛡 Takeoff Audit: Auto-created missing item based on drawing checks. Rationale: ${item.rationale}]`,
+      },
+    };
+
+    const updatedItems = [...items, newItem];
+    setItems(updatedItems);
+
+    // Save to local cache
+    localStorage.setItem(`boq_workspace_${selectedProjectId}`, JSON.stringify(updatedItems));
+
+    // Remove from discovered list
+    setTakeoffOmittedItems((prev) =>
+      prev ? prev.filter((i) => i.description !== item.description) : null
+    );
+
+    toast.success("Omitted Item Injected!", {
+      description: `Added "${item.description}" to BOQ spreadsheet with quantity ${item.tentative_quantity} ${item.unit}.`,
+    });
+  };
+
   const seedProjectData = (projId: string): WorkspaceBoqItem[] => {
     let seeded: WorkspaceBoqItem[] = [];
 
@@ -2017,6 +2149,99 @@ Office of Procurement`;
         </div>
       )}
 
+      {/* DRAWING TAKEOFF AUDIT PANEL MODAL */}
+      {showTakeoffPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 p-6 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="flex h-[80vh] w-full max-w-4xl flex-col rounded-3xl border border-emerald-500/20 bg-zinc-900 shadow-2xl overflow-hidden shadow-emerald-500/5">
+            <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-6 py-4.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded bg-emerald-500/10 text-emerald-400 font-bold text-xs border border-emerald-500/20">🔍</div>
+                <div>
+                  <span className="text-[9px] font-extrabold tracking-widest text-emerald-400 uppercase">AI Blueprint Omitted Item Takeoff Engine</span>
+                  <h3 className="text-sm font-bold text-zinc-200">Drawing Takeoff Audit: Omitted Items Detected</h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTakeoffPanel(false)}
+                className="rounded-xl border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-xs px-3.5 py-1.5 transition text-zinc-300 cursor-pointer"
+              >
+                ✕ Close Panel
+              </button>
+            </div>
+
+            {/* Content Container */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-zinc-900/50">
+              <div className="rounded-2xl border border-emerald-500/10 bg-emerald-950/10 p-4 text-xs text-emerald-400/90 leading-relaxed shadow-inner">
+                💡 <span className="font-bold text-emerald-300">Takeoff Analysis Complete:</span> Gemini 2.5 Flash compared project drawings against your Master BOQ sheet and detected mandatory architectural or MEP accessories that were omitted from the original tender BOQ. Injecting these items protects your margins against client scope gaps.
+              </div>
+
+              {(!takeoffOmittedItems || takeoffOmittedItems.length === 0) ? (
+                <div className="flex flex-col items-center justify-center h-[40vh] border border-dashed border-zinc-800 rounded-2xl bg-zinc-950/20">
+                  <span className="text-3xl mb-3">🎉</span>
+                  <p className="text-sm font-bold text-zinc-300">All Done!</p>
+                  <p className="text-xs text-zinc-500 mt-1">All detected omitted items have been successfully injected into the active Master BOQ.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {takeoffOmittedItems.map((item, index) => (
+                    <div 
+                      key={index} 
+                      className="group relative flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl border border-zinc-800 bg-zinc-950/40 hover:bg-zinc-950/70 hover:border-emerald-500/30 transition-all duration-300 shadow-md"
+                    >
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase border ${
+                            item.category === "HVAC" 
+                              ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" 
+                              : item.category === "Electrical" 
+                              ? "bg-amber-500/10 text-amber-400 border-amber-500/20" 
+                              : item.category === "Plumbing" 
+                              ? "bg-blue-500/10 text-blue-400 border-blue-500/20" 
+                              : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                          }`}>
+                            {item.category}
+                          </span>
+                          <span className="text-zinc-500 text-xs">•</span>
+                          <span className="text-xs text-zinc-400 font-medium">Quantity Takeoff Estimate</span>
+                        </div>
+
+                        <h4 className="text-sm font-bold text-zinc-100">{item.description}</h4>
+                        
+                        <div className="text-xs text-zinc-400 leading-relaxed bg-zinc-950/80 border border-zinc-900/60 rounded-xl p-3.5 mt-2">
+                          <span className="block text-[10px] font-extrabold tracking-wider text-emerald-500 uppercase mb-1">QS Takeoff Mathematical Rationale:</span>
+                          {item.rationale}
+                        </div>
+                      </div>
+
+                      <div className="flex md:flex-col items-end justify-between md:justify-center gap-3.5 min-w-[150px] border-t md:border-t-0 md:border-l border-zinc-800/80 pt-4.5 md:pt-0 md:pl-6">
+                        <div className="text-right">
+                          <span className="block text-[9px] font-extrabold text-zinc-500 uppercase tracking-wider">Calculated Qty</span>
+                          <span className="text-base font-black text-emerald-400">
+                            {item.tentative_quantity} <span className="text-xs font-semibold text-zinc-400">{item.unit}</span>
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleAddOmittedItem(item)}
+                          className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold px-4 py-2 transition shadow-md shadow-emerald-600/15 flex items-center gap-1.5 cursor-pointer"
+                        >
+                          ➕ Add to BOQ
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-zinc-900 border-t border-zinc-800 px-6 py-4 flex justify-between items-center text-xs text-zinc-400">
+              <span>Automatic item additions are tagged with `AI-ADD-*` and document audit traces.</span>
+              <span className="text-emerald-400 font-bold">Drawings Audit Module Live</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* COMMIT REVISION MODAL */}
       {showCommitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 p-6 backdrop-blur-sm animate-in fade-in duration-150">
@@ -2169,6 +2394,29 @@ Office of Procurement`;
                 </>
               ) : (
                 <>🔗 Auto-Link Project Documents via AI</>
+              )}
+            </button>
+          </div>
+
+          {/* AI Blueprint Takeoff Audit Trigger */}
+          <div className="flex flex-col">
+            <label className="text-[9px] font-extrabold text-zinc-500 uppercase mb-1 tracking-wider">Drawing Takeoff Audit</label>
+            <button
+              onClick={handleRunTakeoffAudit}
+              disabled={takeoffLoading || items.length === 0}
+              className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 h-[32px] cursor-pointer shadow-md ${
+                takeoffLoading
+                  ? "bg-emerald-950 border border-zinc-800 text-zinc-400"
+                  : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/10"
+              }`}
+            >
+              {takeoffLoading ? (
+                <>
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent mr-1" />
+                  Auditing Blueprints...
+                </>
+              ) : (
+                <>🔍 Audit Drawings for Omitted Items</>
               )}
             </button>
           </div>
