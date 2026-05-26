@@ -19,7 +19,8 @@ const HOP_BY_HOP = new Set([
 function buildTargetUrl(pathSegments: string[], search: string): string {
   const base = getServerBackendUrl();
   const path = pathSegments.map(encodeURIComponent).join("/");
-  return `${base}/${path}${search}`;
+  const suffix = base.endsWith("/api") || base.endsWith("/api/") ? "" : "/api";
+  return `${base}${suffix}/${path}${search}`;
 }
 
 async function proxy(request: NextRequest, pathSegments: string[]) {
