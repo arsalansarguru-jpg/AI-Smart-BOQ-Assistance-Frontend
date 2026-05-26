@@ -46,6 +46,29 @@ export function getApiBaseUrl(): string {
   return getClientApiBaseUrl();
 }
 
+async function fetchWithFallback(
+  path: string,
+  init?: RequestInit
+): Promise<Response> {
+  const base = getClientApiBaseUrl();
+  const directUrl = `${base}${path}`;
+
+  if (base === "/api/backend") {
+    return fetch(directUrl, init);
+  }
+
+  try {
+    return await fetch(directUrl, init);
+  } catch (err) {
+    console.warn(`Direct fetch to ${directUrl} failed, falling back to same-origin proxy:`, err);
+    if (typeof window !== "undefined") {
+      (window as any).__BACKEND_URL__ = "/api/backend";
+    }
+    const proxyUrl = `/api/backend${path}`;
+    return fetch(proxyUrl, init);
+  }
+}
+
 async function readApiErrorMessage(
   res: Response,
   fallback: string
@@ -77,7 +100,7 @@ export async function extractFromFile(
   const form = new FormData();
   form.append("file", file, filename);
 
-  const res = await fetch(`${API_BASE}/api/extract`, {
+  const res = await fetchWithFallback(`/api/extract`, {
     method: "POST",
     body: form,
   });
@@ -94,7 +117,7 @@ export async function extractFromFile(
 export async function structureExtractedBoq(
   extract: ExtractResponse
 ): Promise<StructureResponse> {
-  const res = await fetch(`${API_BASE}/api/structure`, {
+  const res = await fetchWithFallback(`/api/structure`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -132,7 +155,7 @@ export type QuotationStructureResponse = {
 export async function structureExtractedQuotation(
   extract: ExtractResponse
 ): Promise<QuotationStructureResponse> {
-  const res = await fetch(`${API_BASE}/api/structure/quotation`, {
+  const res = await fetchWithFallback(`/api/structure/quotation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -171,7 +194,7 @@ export async function exportBoqToExcel(
   structured: StructureResponse,
   options?: ExportBoqOptions
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/export/excel`, {
+  const res = await fetchWithFallback(`/api/export/excel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -248,7 +271,7 @@ function getHeaders(): Record<string, string> {
 export async function autoLinkProjectFiles(
   payload: AutoLinkRequest
 ): Promise<AutoLinkResponse> {
-  const res = await fetch(`${API_BASE}/api/sourcing/auto-link`, {
+  const res = await fetchWithFallback(`/api/sourcing/auto-link`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(payload),
@@ -282,7 +305,7 @@ export type PriceListMatchResponse = {
 export async function matchPriceListCatalog(
   payload: PriceListMatchRequest
 ): Promise<PriceListMatchResponse> {
-  const res = await fetch(`${API_BASE}/api/sourcing/match-price-list`, {
+  const res = await fetchWithFallback(`/api/sourcing/match-price-list`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(payload),
@@ -299,7 +322,7 @@ export async function matchPriceListCatalog(
 
 export async function checkApiHealth(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    const res = await fetchWithFallback(`/health`, { cache: "no-store" });
     return res.ok;
   } catch {
     return false;
