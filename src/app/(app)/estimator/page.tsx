@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo, Fragment } from "react";
+import { useEffect, useState, useRef, useMemo, Fragment, useCallback } from "react";
 import PageBreadcrumb from "@/app/(app)/_components/page-breadcrumb";
 import { fetchVendorQuotations, type LocalVendorQuotation } from "@/lib/tenders/quotations";
 import { createClient } from "@/lib/supabase/client";
@@ -470,6 +470,56 @@ export default function MasterBoqWorkspace() {
     setSourcingLoading(false);
   }, [selectedItemId]);
 
+  // Match live supplier quotes helper for any item
+  const getMatchedQuotesForItem = useCallback((boqItem: WorkspaceBoqItem): { vendor: string; rate: number; brand: string; date: string; file: string }[] => {
+    if (!boqItem || !vendorQuotations.length) return [];
+    const keywords = boqItem.description.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const matchedItems: { vendor: string; rate: number; brand: string; date: string; file: string }[] = [];
+    
+    const isPanel = (desc: string) => {
+      const d = desc.toLowerCase();
+      return d.includes("panel") || d.includes("db") || d.includes("distribution board") || d.includes("switchboard") || d.includes("distribution box") || d.includes("apfc") || d.includes("mdb");
+    };
+
+    for (const quote of vendorQuotations) {
+      for (const qItem of quote.items) {
+        const itemDescLower = boqItem.description.toLowerCase();
+        const quoteNameLower = qItem.item_name.toLowerCase();
+        const quoteNormLower = qItem.normalized_item_name.toLowerCase();
+        
+        const matchNormalized = quoteNormLower.includes(itemDescLower) ||
+                                itemDescLower.includes(quoteNormLower);
+        
+        let keywordOverlap = false;
+        if (!matchNormalized) {
+          const matchCount = keywords.filter(kw => qItem.item_name.toLowerCase().includes(kw)).length;
+          if (matchCount >= 2) keywordOverlap = true;
+          
+          if (!keywordOverlap && isPanel(boqItem.description) && (isPanel(qItem.item_name) || isPanel(qItem.normalized_item_name))) {
+            if (boqItem.category === "Electrical" || quoteNormLower.includes("panel") || quoteNameLower.includes("panel")) {
+              keywordOverlap = true;
+            }
+          }
+        }
+
+        if (matchNormalized || keywordOverlap) {
+          matchedItems.push({
+            vendor: quote.vendor_name,
+            rate: qItem.quoted_rate,
+            brand: qItem.brand || "Unspecified",
+            date: quote.quotation_date,
+            file: quote.file_name
+          });
+        }
+      }
+    }
+    return matchedItems.sort((a, b) => a.rate - b.rate);
+  }, [vendorQuotations]);
+
+  const uniqueVendors = useMemo(() => {
+    return Array.from(new Set(vendorQuotations.map(q => q.vendor_name)));
+  }, [vendorQuotations]);
+
   const savingsAnalysis = useMemo(() => {
     if (items.length === 0 || vendorQuotations.length === 0) return null;
 
@@ -479,31 +529,21 @@ export default function MasterBoqWorkspace() {
     for (const boqItem of items) {
       if (boqItem.status === "Approved") continue;
       
-      let bestMatch: { rate: number; vendor: string; score: number } | null = null;
-
-      for (const q of vendorQuotations) {
-        for (const qItem of q.items) {
-          const score = getSimilarityScore(boqItem.description, qItem.item_name);
-          
-          if (score >= 0.65) {
-            if (!bestMatch || qItem.quoted_rate < bestMatch.rate) {
-              bestMatch = { rate: qItem.quoted_rate, vendor: q.vendor_name, score };
-            }
-          }
+      const itemQuotes = getMatchedQuotesForItem(boqItem);
+      if (itemQuotes.length > 0) {
+        const bestMatch = itemQuotes[0]; // index 0 is cheapest as it's sorted ascending
+        if (bestMatch.rate < boqItem.rate) {
+          const delta = boqItem.rate - bestMatch.rate;
+          const savings = delta * boqItem.quantity;
+          totalSavings += savings;
+          itemsToReconcile.push({
+            itemId: boqItem.id,
+            originalRate: boqItem.rate,
+            suggestedRate: bestMatch.rate,
+            vendorName: bestMatch.vendor,
+            savings
+          });
         }
-      }
-
-      if (bestMatch && bestMatch.rate < boqItem.rate) {
-        const delta = boqItem.rate - bestMatch.rate;
-        const savings = delta * boqItem.quantity;
-        totalSavings += savings;
-        itemsToReconcile.push({
-          itemId: boqItem.id,
-          originalRate: boqItem.rate,
-          suggestedRate: bestMatch.rate,
-          vendorName: bestMatch.vendor,
-          savings
-        });
       }
     }
 
@@ -512,7 +552,7 @@ export default function MasterBoqWorkspace() {
       opportunitiesCount: itemsToReconcile.length,
       itemsToReconcile
     };
-  }, [items, vendorQuotations]);
+  }, [items, vendorQuotations, getMatchedQuotesForItem]);
 
   const billingMetrics = useMemo(() => {
     if (items.length === 0) return { prev: 0, current: 0, cum: 0, retention: 0, net: 0, backlog: 0, progress: 0 };
@@ -2198,37 +2238,11 @@ Office of Procurement`;
     return getHistoricalRates(selectedItem.description, selectedItem.category);
   }, [selectedItem]);
 
-  // Match live supplier quotes
+  // Match live supplier quotes for currently selected item
   const matchedSupplierQuotes = useMemo(() => {
-    if (!selectedItem || !vendorQuotations.length) return [];
-    const keywords = selectedItem.description.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    
-    const matchedItems: { vendor: string; rate: number; brand: string; date: string; file: string }[] = [];
-    
-    for (const quote of vendorQuotations) {
-      for (const qItem of quote.items) {
-        const matchNormalized = qItem.normalized_item_name.toLowerCase().includes(selectedItem.description.toLowerCase()) ||
-                                selectedItem.description.toLowerCase().includes(qItem.normalized_item_name.toLowerCase());
-        
-        let keywordOverlap = false;
-        if (!matchNormalized) {
-          const matchCount = keywords.filter(kw => qItem.item_name.toLowerCase().includes(kw)).length;
-          if (matchCount >= 2) keywordOverlap = true;
-        }
-
-        if (matchNormalized || keywordOverlap) {
-          matchedItems.push({
-            vendor: quote.vendor_name,
-            rate: qItem.quoted_rate,
-            brand: qItem.brand || "Unspecified",
-            date: quote.quotation_date,
-            file: quote.file_name
-          });
-        }
-      }
-    }
-    return matchedItems.sort((a, b) => a.rate - b.rate);
-  }, [selectedItem, vendorQuotations]);
+    if (!selectedItem) return [];
+    return getMatchedQuotesForItem(selectedItem);
+  }, [selectedItem, getMatchedQuotesForItem]);
 
   // Git Revision Diff Calculator
   const selectedRevForComparison = useMemo(() => {
@@ -3576,22 +3590,27 @@ Office of Procurement`;
                                         disabled={!canEditRow}
                                         onChange={(e) => {
                                           updateItemField(item.id, "selectedVendor", e.target.value);
-                                          const match = matchedSupplierQuotes.find(q => q.vendor === e.target.value);
+                                          const rowQuotes = getMatchedQuotesForItem(item);
+                                          const match = rowQuotes.find((q: any) => q.vendor === e.target.value);
                                           if (match) updateItemField(item.id, "rate", match.rate);
                                         }}
-                                        className="w-full bg-transparent border-0 rounded px-1 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition"
+                                        className="w-full bg-transparent border-0 rounded px-1 py-1 text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:ring-1 focus:ring-violet-600 transition cursor-pointer"
                                       >
                                         <option value="None">None (Manual)</option>
-                                        <option value="ABC Metals & Tubes">ABC Metals & Tubes</option>
-                                        <option value="Supreme Piping Corp">Supreme Piping Corp</option>
-                                        <option value="Global Trades">Global Trades</option>
-                                        <option value="Tata Steel Piping">Tata Steel Piping</option>
-                                        <option value="Tyco Fire Protection">Tyco Fire Protection</option>
-                                        <option value="UltraTech Concrete">UltraTech Concrete</option>
-                                        <option value="Hikvision Direct">Hikvision Direct</option>
-                                        <option value="Anchor">Anchor</option>
-                                        <option value="Havells">Havells</option>
-                                        <option value="Polycab">Polycab</option>
+                                        {uniqueVendors.map(v => (
+                                          <option key={v} value={v}>{v}</option>
+                                        ))}
+                                        {/* Fallbacks just in case */}
+                                        {!uniqueVendors.includes("ABC Metals & Tubes") && <option value="ABC Metals & Tubes">ABC Metals & Tubes</option>}
+                                        {!uniqueVendors.includes("Supreme Piping Corp") && <option value="Supreme Piping Corp">Supreme Piping Corp</option>}
+                                        {!uniqueVendors.includes("Global Trades") && <option value="Global Trades">Global Trades</option>}
+                                        {!uniqueVendors.includes("Tata Steel Piping") && <option value="Tata Steel Piping">Tata Steel Piping</option>}
+                                        {!uniqueVendors.includes("Tyco Fire Protection") && <option value="Tyco Fire Protection">Tyco Fire Protection</option>}
+                                        {!uniqueVendors.includes("UltraTech Concrete") && <option value="UltraTech Concrete">UltraTech Concrete</option>}
+                                        {!uniqueVendors.includes("Hikvision Direct") && <option value="Hikvision Direct">Hikvision Direct</option>}
+                                        {!uniqueVendors.includes("Anchor") && <option value="Anchor">Anchor</option>}
+                                        {!uniqueVendors.includes("Havells") && <option value="Havells">Havells</option>}
+                                        {!uniqueVendors.includes("Polycab") && <option value="Polycab">Polycab</option>}
                                       </select>
                                     </td>
                                     <td className="px-3 py-2.5 text-right font-extrabold text-zinc-100">{formatPrice(item.amount)}</td>
@@ -3897,7 +3916,7 @@ Office of Procurement`;
 
                     {matchedSupplierQuotes.length > 0 ? (
                       <div className="space-y-2">
-                        {matchedSupplierQuotes.slice(0, 2).map((quote, qi) => {
+                        {matchedSupplierQuotes.slice(0, 2).map((quote: any, qi: number) => {
                           const isLowest = qi === 0;
                           return (
                             <div
