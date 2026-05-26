@@ -100,8 +100,17 @@ export async function extractFromFile(
   const form = new FormData();
   form.append("file", file, filename);
 
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    const customKey = localStorage.getItem("custom_gemini_api_key");
+    if (customKey && customKey.trim()) {
+      headers["X-Gemini-API-Key"] = customKey.trim();
+    }
+  }
+
   const res = await fetchWithFallback(`/api/extract`, {
     method: "POST",
+    headers,
     body: form,
   });
 
@@ -119,7 +128,7 @@ export async function structureExtractedBoq(
 ): Promise<StructureResponse> {
   const res = await fetchWithFallback(`/api/structure`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify({
       filename: extract.filename,
       tables: extract.tables,
@@ -157,7 +166,7 @@ export async function structureExtractedQuotation(
 ): Promise<QuotationStructureResponse> {
   const res = await fetchWithFallback(`/api/structure/quotation`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify({
       filename: extract.filename,
       tables: extract.tables,
