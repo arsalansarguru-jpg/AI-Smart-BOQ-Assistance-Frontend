@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, Fragment, useCallback } from "rea
 import PageBreadcrumb from "@/app/(app)/_components/page-breadcrumb";
 import { fetchVendorQuotations, type LocalVendorQuotation } from "@/lib/tenders/quotations";
 import { createClient } from "@/lib/supabase/client";
-import { autoLinkProjectFiles, matchPriceListCatalog } from "@/lib/api";
+import { autoLinkProjectFiles, matchPriceListCatalog, getApiBaseUrl } from "@/lib/api";
 import type { TenderFile } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -929,7 +929,7 @@ Office of Procurement`;
         headers["X-Gemini-API-Key"] = customKey.trim();
       }
 
-      const res = await fetch("/api/backend/sourcing/discover", {
+      const res = await fetch(`${getApiBaseUrl()}/sourcing/discover`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -1416,7 +1416,7 @@ Office of Procurement`;
         headers["X-Gemini-API-Key"] = customKey.trim();
       }
 
-      const res = await fetch("/api/backend/takeoff/audit-drawings", {
+      const res = await fetch(`${getApiBaseUrl()}/takeoff/audit-drawings`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -1589,7 +1589,7 @@ Office of Procurement`;
         headers["X-Gemini-API-Key"] = customKey.trim();
       }
 
-      const res = await fetch("/api/backend/billing/generate-ra-bill", {
+      const res = await fetch(`${getApiBaseUrl()}/billing/generate-ra-bill`, {
         method: "POST",
         headers,
         body: JSON.stringify({

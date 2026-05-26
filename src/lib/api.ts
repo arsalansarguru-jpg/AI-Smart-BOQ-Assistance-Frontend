@@ -38,10 +38,12 @@ export type StructureResponse = {
   rows_analyzed?: number | null;
 };
 
-const API_BASE = getClientApiBaseUrl();
+const API_BASE = {
+  toString: () => getClientApiBaseUrl()
+} as any as string;
 
 export function getApiBaseUrl(): string {
-  return API_BASE;
+  return getClientApiBaseUrl();
 }
 
 async function readApiErrorMessage(
