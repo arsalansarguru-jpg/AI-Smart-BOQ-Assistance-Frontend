@@ -543,7 +543,8 @@ export default function MasterBoqWorkspace() {
   };
 
   // Relationship Map local states & toggle mappings
-  const [sidebarTab, setSidebarTab] = useState<"specs" | "buildup" | "map">("specs");
+  const [sidebarTab, setSidebarTab] = useState<"specs" | "buildup" | "map" | "rfq">("specs");
+  const [invitedSuppliers, setInvitedSuppliers] = useState<Record<string, { status: "pending" | "submitted"; link: string; netTotal?: number }>>({});
   const [catalogMatchingLoading, setCatalogMatchingLoading] = useState(false);
   const [focusedGraphNode, setFocusedGraphNode] = useState<"drawing" | "clause" | "make" | "quote" | "risk">("drawing");
   const [graphSearchQuery, setGraphSearchQuery] = useState("");
@@ -2896,6 +2897,15 @@ Office of Procurement`;
                   >
                     Interactive Linker
                   </button>
+                  <span className="text-zinc-750">|</span>
+                  <button
+                    onClick={() => setSidebarTab("rfq")}
+                    className={`text-xs font-bold transition cursor-pointer ${
+                      sidebarTab === "rfq" ? "text-violet-400 font-extrabold" : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    RFQ Coordinator
+                  </button>
                 </div>
                 <button
                   onClick={() => setSelectedItemId(null)}
@@ -3401,6 +3411,155 @@ Office of Procurement`;
                       </div>
                     );
                   })()}
+                </div>
+              )}
+
+              {sidebarTab === "rfq" && (
+                <div className="space-y-4 animate-in fade-in duration-200 text-xs text-zinc-300 select-none">
+                  <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3">
+                    <span className="text-[10px] font-extrabold text-violet-400 uppercase tracking-wider block mb-1">RFQ Coordinator Console</span>
+                    <p className="text-[10px] text-zinc-500 leading-normal">
+                      Bypass manual phone calls and Excel sheets. Segment the BOQ and distribute secure portals to your supplier network instantly.
+                    </p>
+                  </div>
+
+                  {/* ACTIVE ITEM DETAILS */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                    <span className="text-[9px] font-extrabold text-zinc-500 uppercase tracking-widest block mb-1">Target BOQ Item</span>
+                    <div className="text-[11px] font-bold text-zinc-200 truncate">{selectedItem.description}</div>
+                    <div className="text-[10px] text-zinc-500 mt-1">Category: <span className="text-violet-400 font-bold">{selectedItem.category || "General"}</span></div>
+                  </div>
+
+                  {/* INVITED SUPPLIERS LIST */}
+                  <div className="space-y-3">
+                    {[
+                      { name: "Polycab Wires", trade: "Electrical", code: "polycab", defaultLp: 395, defaultDc: 18 },
+                      { name: "Astral Pipes", trade: "Plumbing", code: "astral", defaultLp: 625, defaultDc: 22 },
+                      { name: "Schneider Electric", trade: "ELV & Electrical", code: "schneider", defaultLp: 1850, defaultDc: 15 }
+                    ].map((supplier) => {
+                      const sessionKey = `rfq_session_${supplier.code}_${selectedItem.id}`;
+                      const session = invitedSuppliers[sessionKey];
+                      
+                      return (
+                        <div key={supplier.name} className="bg-zinc-900 border border-zinc-850 rounded-xl p-3.5 space-y-3 relative overflow-hidden group">
+                          {/* Top Status */}
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <h4 className="font-bold text-zinc-200 text-[11px]">{supplier.name}</h4>
+                              <span className="text-[9px] text-zinc-500 uppercase tracking-wider block mt-0.5">{supplier.trade} Catalog</span>
+                            </div>
+                            
+                            {!session ? (
+                              <span className="text-[8px] font-extrabold uppercase tracking-widest text-zinc-650 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850">
+                                Uninvited
+                              </span>
+                            ) : session.status === "pending" ? (
+                              <span className="text-[8px] font-extrabold uppercase tracking-widest text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 animate-pulse">
+                                Pending Quote
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-extrabold uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                Submitted
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Action Zone */}
+                          {!session ? (
+                            <button
+                              disabled={boqLocked}
+                              onClick={() => {
+                                // Simulate API distribution
+                                setInvitedSuppliers(prev => ({
+                                  ...prev,
+                                  [sessionKey]: {
+                                    status: "pending",
+                                    link: `/rfq/${sessionKey}`
+                                  }
+                                }));
+                                toast.success(`Generated RFQ for ${supplier.name}!`, {
+                                  description: "Quoting portal link is ready to distribute."
+                                });
+                              }}
+                              className="w-full bg-zinc-950 hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-extrabold py-1.5 rounded-lg transition uppercase tracking-wider text-[9px] cursor-pointer"
+                            >
+                              🔗 Generate Secure RFQ link
+                            </button>
+                          ) : (
+                            <div className="space-y-2.5">
+                              {/* Secure Quoting Url Box */}
+                              <div className="flex items-center gap-1 bg-zinc-950 px-2 py-1.5 rounded border border-zinc-900 text-[9px] font-mono text-zinc-550 select-text overflow-hidden justify-between">
+                                <span className="truncate">/rfq/{sessionKey.substring(0,18)}...</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    // Generate the actual full URL to let user test
+                                    const fullUrl = `${window.location.origin}/rfq/${sessionKey}`;
+                                    navigator.clipboard.writeText(fullUrl);
+                                    toast.success("Link copied to clipboard!", {
+                                      description: "Send this URL to the supplier to gather quotes."
+                                    });
+                                  }}
+                                  className="text-violet-400 hover:text-violet-300 cursor-pointer font-sans font-bold"
+                                >
+                                  COPY LINK
+                                </button>
+                              </div>
+
+                              {/* Simulation submission for local demo */}
+                              <button
+                                disabled={boqLocked}
+                                onClick={async () => {
+                                  // Update active item inside workspace with the supplier pricing
+                                  const listPrice = supplier.defaultLp;
+                                  const discount = supplier.defaultDc;
+                                  const netRate = listPrice * (1 - (discount / 100));
+                                  
+                                  const updatedItems = items.map((item) => {
+                                    if (item.id === selectedItem.id) {
+                                      return {
+                                        ...item,
+                                        rateType: "composite" as const,
+                                        listPrice: listPrice,
+                                        discountPercentage: discount,
+                                        rate: netRate + (item.laborCost ?? 50), // landed rate + labor
+                                        remarks: `[🛡 Verified: ${supplier.name} Quoting Portal rates synced - ${discount}% discount applied]`
+                                      };
+                                    }
+                                    return item;
+                                  });
+
+                                  setItems(updatedItems);
+                                  
+                                  // Mark as submitted
+                                  setInvitedSuppliers(prev => ({
+                                    ...prev,
+                                    [sessionKey]: {
+                                      ...prev[sessionKey],
+                                      status: "submitted",
+                                      netTotal: netRate
+                                    }
+                                  }));
+
+                                  // Cache in localStorage
+                                  if (typeof window !== "undefined") {
+                                    localStorage.setItem("estimator_workspace_items", JSON.stringify(updatedItems));
+                                  }
+
+                                  toast.success(`Rates Synced from ${supplier.name}!`, {
+                                    description: `Applied List Price: ₹${listPrice}, Discount: ${discount}%. Workspace updated.`
+                                  });
+                                }}
+                                className="w-full bg-violet-600/10 hover:bg-violet-600/20 text-violet-400 border border-violet-500/20 hover:border-violet-500/40 font-extrabold py-1.5 rounded-lg transition uppercase tracking-wider text-[9px] cursor-pointer"
+                              >
+                                ⚡ Simulate Supplier Submission
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
